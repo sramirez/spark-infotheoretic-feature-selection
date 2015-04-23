@@ -27,9 +27,9 @@ This work has associated two submitted contributions to international journals w
       		nToSelect, // number of features to select
 	      nPool) // number of features in pool
     	featureSelector
-		    
-        val reduced = data.map(i => LabeledPoint(i.label, featureSelector.transform(i.features)))
-        reduced.first()
+	
+	val reduced = data.map(i => LabeledPoint(i.label, featureSelector.transform(i.features)))
+	reduced.first()
         
 
 Design doc: https://docs.google.com/document/d/1HOaPL_HJzTbL2tVdzbTjhr5wxVvPe9e-23S7rc2VcsY/edit?usp=sharing
