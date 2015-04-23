@@ -12,6 +12,26 @@ This work has associated two submitted contributions to international journals w
 - A dataset selected for the GECCO-2014 in Vancouver, July 13th, 2014 competition, which comes from the Protein Structure Prediction field (http://cruncher.ncl.ac.uk/bdcomp/). The dataset has 32 million instances, 631 attributes, 2 classes, 98% of negative examples and occupies, when uncompressed, about 56GB of disk space.
 - Epsilon dataset: http://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary.html#epsilon. 400K instances and 2K attributes.
 
+-- Example: 
+
+			val criterion = new InfoThCriterionFactory("mrmr")
+			val nToSelect = 100
+			val nPool = 100 // 0 -> w/o pool
+
+			println("*** FS criterion: " + criterion.getCriterion.toString)
+			println("*** Number of features to select: " + nToSelect)
+			println("*** Pool size: " + nPool)
+      
+			val featureSelector = InfoThSelector.train(criterion, 
+		      data, // RDD[LabeledPoint]
+		      nToSelect, // number of features to select
+		      nPool) // number of features in pool
+	    featureSelector
+		    
+        val reduced = data.map(i => LabeledPoint(i.label, featureSelector.transform(i.features)))
+        reduced.first()
+        
+
 Design doc: https://docs.google.com/document/d/1HOaPL_HJzTbL2tVdzbTjhr5wxVvPe9e-23S7rc2VcsY/edit?usp=sharing
 
 References
