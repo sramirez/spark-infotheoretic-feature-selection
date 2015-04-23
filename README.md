@@ -14,19 +14,19 @@ This work has associated two submitted contributions to international journals w
 
 -- Example: 
 
-			val criterion = new InfoThCriterionFactory("mrmr")
-			val nToSelect = 100
-			val nPool = 100 // 0 -> w/o pool
-
-			println("*** FS criterion: " + criterion.getCriterion.toString)
-			println("*** Number of features to select: " + nToSelect)
-			println("*** Pool size: " + nPool)
-      
-			val featureSelector = InfoThSelector.train(criterion, 
-		      data, // RDD[LabeledPoint]
-		      nToSelect, // number of features to select
-		      nPool) // number of features in pool
-	    featureSelector
+	val criterion = new InfoThCriterionFactory("mrmr")
+	val nToSelect = 100
+	val nPool = 100 // 0 -> w/o pool
+	
+	println("*** FS criterion: " + criterion.getCriterion.toString)
+	println("*** Number of features to select: " + nToSelect)
+	println("*** Pool size: " + nPool)
+	
+	val featureSelector = InfoThSelector.train(criterion, 
+	      	data, // RDD[LabeledPoint]
+      		nToSelect, // number of features to select
+	      nPool) // number of features in pool
+    	featureSelector
 		    
         val reduced = data.map(i => LabeledPoint(i.label, featureSelector.transform(i.features)))
         reduced.first()
