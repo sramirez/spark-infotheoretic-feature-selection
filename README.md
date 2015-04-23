@@ -4,18 +4,13 @@ The present framework implements Feature Selection (FS) on Spark for its applica
 
 -- Main features:
 * Support for sparse data (in progress).
-* Pool optimization for high-dimensional.
+* Pool optimization.
 * Improved performance from previous version.
 
-This work has associated two submitted contributions to international journals which will be attached to this request as soon as they are accepted This software has been proved with two large real-world datasets such as:
+This work has associated two submitted contributions to international journals which will be attached to this request as soon as they are accepted. This software has been proved with two large real-world datasets such as:
 
 - A dataset selected for the GECCO-2014 in Vancouver, July 13th, 2014 competition, which comes from the Protein Structure Prediction field (http://cruncher.ncl.ac.uk/bdcomp/). The dataset has 32 million instances, 631 attributes, 2 classes, 98% of negative examples and occupies, when uncompressed, about 56GB of disk space.
 - Epsilon dataset: http://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary.html#epsilon. 400K instances and 2K attributes.
-
--- Brief benchmark results:
-
-* 150 seconds by selected feature for a 65M dataset with 631 attributes. 
-*  For epsilon dataset, we have outperformed the results without FS for three classifers (from MLLIB) using only 2.5% of original features.
 
 Design doc: https://docs.google.com/document/d/1HOaPL_HJzTbL2tVdzbTjhr5wxVvPe9e-23S7rc2VcsY/edit?usp=sharing
 
