@@ -20,14 +20,15 @@ package org.apache.spark.mllib.feature
 
 import breeze.linalg.{DenseVector => BDV, SparseVector => BSV, Vector => BV}
 
-import org.apache.spark.SparkContext._ 
+import org.apache.spark.SparkContext._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.feature.{InfoTheory => IT}
 import org.apache.spark.storage.StorageLevel
-import org.apache.spark.mllib.linalg.{DenseVector, SparseVector}
+import org.apache.spark.mllib.linalg.{Vector, DenseVector, SparseVector}
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.mllib.feature.{InfoThCriterionFactory => FT}
+import org.apache.spark.SparkException
 
 /**
  * Train a info-theory feature selection model according to a criterion.
@@ -36,28 +37,12 @@ import org.apache.spark.mllib.feature.{InfoThCriterionFactory => FT}
  * @param data RDD of LabeledPoint (discrete data).
  * 
  */
-@Experimental
-class InfoThSelector private[feature] (
-    val criterionFactory: FT, 
-    val data: RDD[LabeledPoint]) extends Serializable {
+class InfoThSelector private[feature] (val criterionFactory: FT) extends Serializable {
 
   // Pool of criterions
   private type Pool = RDD[(Int, InfoThCriterion)]
   // Case class for criterions by feature
-  protected case class F(feat: Int, crit: Double)
-    
-  val (nFeatures, isDense) = data.first.features match {
-    case v: SparseVector => (v.size, false)
-    case v: DenseVector => (v.size, true)
-  }
-  
-  val byteData: RDD[BV[Byte]] = data.map {
-    case LabeledPoint(label, values: SparseVector) => 
-      new BSV[Byte](0 +: values.indices.map(_ + 1), 
-        label.toByte +: values.values.toArray.map(_.toByte), values.indices.size + 1)
-    case LabeledPoint(label, values: DenseVector) => 
-      new BDV[Byte](label.toByte +: values.toArray.map(_.toByte))
-  }
+  protected case class F(feat: Int, crit: Double) 
 
   /**
    * Perform a info-theory selection process without pool optimization.
@@ -82,7 +67,7 @@ class InfoThSelector private[feature] (
       .take(nToSelect)
       .map({case ((f, _), (mi, _)) => f + "\t" + "%.4f" format mi})
       .mkString("\n")
-    // println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels)  
+    println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels)  
     // get maximum and select it
     val firstMax = pool.maxBy(_._2.score)
     var selected = Seq(F(firstMax._1, firstMax._2.score))
@@ -124,6 +109,7 @@ class InfoThSelector private[feature] (
     
     val label = 0
     val nElements = data.count()
+    val nFeatures = data.first.size - 1
     
     // calculate relevance for all attributes
     var orderedRels = IT.miAndCmi(data,1 to nFeatures, Seq(label), None, nElements, nFeatures)
@@ -200,24 +186,54 @@ class InfoThSelector private[feature] (
     selected.reverse
   }  
 
-  private[feature] def run(nToSelect: Int, poolSize: Int = 30) = {
-    
-    require(nToSelect < nFeatures)
-    val bdata = byteData.persist(StorageLevel.MEMORY_AND_DISK_SER)
-    
-    val selected = criterionFactory.getCriterion match {
-      case _: InfoThCriterion with Bound if poolSize != 0 =>
-        selectFeaturesWithPool(bdata, nToSelect, poolSize)
-      case _: InfoThCriterion =>
-        selectFeaturesWithoutPool(bdata, nToSelect)
+  private[feature] def run(
+      data: RDD[LabeledPoint], 
+      nToSelect: Int, 
+      poolSize: Int = 30) = {
+        
+        val requireByteValues = (l: Double, v: Vector) => {        
+          val values = v match {
+            case SparseVector(size, indices, values) =>
+              values
+            case DenseVector(values) =>
+              values
+          }
+          val condition = (value: Double) => value <= Byte.MaxValue && 
+            value >= Byte.MinValue && value % 1 == 0.0
+          if (!values.forall(condition(_)) || !condition(l)) {
+            throw new SparkException(s"Info-Theoretic Framework requires integer values in range [0, 255]")
+          }
+        }
+        
+        val byteData: RDD[BV[Byte]] = data.map {
+          case LabeledPoint(label, values: SparseVector) => 
+            requireByteValues(label, values)
+            new BSV[Byte](0 +: values.indices.map(_ + 1), 
+              label.toByte +: values.values.toArray.map(_.toByte), values.indices.size + 1)
+          case LabeledPoint(label, values: DenseVector) => 
+            requireByteValues(label, values)
+            new BDV[Byte](label.toByte +: values.toArray.map(_.toByte))
+        }
+
+        byteData.persist(StorageLevel.MEMORY_ONLY_SER)
+        val nFeatures = byteData.first.size - 1
+        require(nToSelect < nFeatures)
+        
+        val selected = criterionFactory.getCriterion match {
+          case _: InfoThCriterion with Bound if poolSize != 0 =>
+            selectFeaturesWithPool(byteData, nToSelect, poolSize)
+          case _: InfoThCriterion =>
+            selectFeaturesWithoutPool(byteData, nToSelect)
+        }
+      
+        byteData.unpersist()
+      
+        // Print best features according to the mRMR measure
+        val out = selected.map{case F(feat, rel) => feat + "\t" + "%.4f".format(rel)}.mkString("\n")
+        println("\n*** mRMR features ***\nFeature\tScore\n" + out)
+        // Features must be sorted
+        new SelectorModel(selected.map{case F(feat, rel) => feat - 1}.sorted.toArray)
     }
-    
-    // Print best features according to the mRMR measure
-    val out = selected.map{case F(feat, rel) => feat + "\t" + "%.4f".format(rel)}.mkString("\n")
-    println("\n*** mRMR features ***\nFeature\tScore\n" + out)
-    // Features must be sorted
-    new SelectorModel(selected.map{case F(feat, rel) => feat - 1}.sorted.toArray)
-  }
 }
 
 object InfoThSelector {
@@ -227,7 +243,7 @@ object InfoThSelector {
    * and return a subset of data.
    *
    * @param   criterionFactory Initialized criterion to use in this selector
-   * @param   data RDD of LabeledPoint (discrete data in range of 256 values).
+   * @param   data RDD of LabeledPoint (discrete data as integers in range [0, 255]).
    * @param   nToSelect maximum number of features to select
    * @param   poolSize number of features to be used in pool optimization.
    * @return  A feature selection model which contains a subset of selected features
@@ -242,6 +258,6 @@ object InfoThSelector {
       data: RDD[LabeledPoint],
       nToSelect: Int = 25,
       poolSize: Int = 0) = {
-    new InfoThSelector(criterionFactory, data).run(nToSelect, poolSize)
+    new InfoThSelector(criterionFactory).run(data, nToSelect, poolSize)
   }
 }
