@@ -22,6 +22,7 @@ import breeze.linalg.{DenseVector => BDV, SparseVector => BSV, Vector => BV}
 
 import org.apache.spark.SparkContext._
 import org.apache.spark.rdd.RDD
+import org.apache.spark.HashPartitioner
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.feature.{InfoTheory => IT}
 import org.apache.spark.storage.StorageLevel
@@ -64,7 +65,7 @@ class InfoThSelector private[feature] (val criterionFactory: FT) extends Seriali
       .collectAsMap()  
     // Print most relevant features
     val strRels = MiAndCmi.collect().sortBy(-_._2._1)
-      .take(nToSelect)
+      .take(100)
       .map({case ((f, _), (mi, _)) => f + "\t" + "%.4f" format mi})
       .mkString("\n")
     println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels)  
@@ -91,11 +92,14 @@ class InfoThSelector private[feature] (val criterionFactory: FT) extends Seriali
       // select the best feature and remove from the whole set of features
       selected = F(max._1, max._2.score) +: selected
       pool = pool - max._1
+      
+      val out = selected.map{case F(feat, rel) => feat + "\t" + "%.4f".format(rel)}.mkString("\n")
+      println("\n*** last features ***\nFeature\tScore\n" + out)
     }    
     selected.reverse
   }
-   
-   
+  
+
  /**
    * Perform a info-theory selection process with pool optimization.
    * 
@@ -105,7 +109,10 @@ class InfoThSelector private[feature] (val criterionFactory: FT) extends Seriali
    * @return A list with the most relevant features and its scores.
    * 
    */
-  private[feature] def selectFeaturesWithPool(data: RDD[BV[Byte]],nToSelect: Int,poolSize: Int) = {
+  private[feature] def selectFeaturesWithPool(
+      data: RDD[BV[Byte]], 
+      nToSelect: Int, 
+      poolSize: Int) = {
     
     val label = 0
     val nElements = data.count()
@@ -120,7 +127,7 @@ class InfoThSelector private[feature] (val criterionFactory: FT) extends Seriali
     // Print most relevant features
     val strRels = orderedRels.take(nToSelect)
       .map({case (f, c) => f + "\t" + "%.4f" format c}).mkString("\n")
-    // println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels)
+    println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels)
   
     // extract initial pool
     val initialPoolSize = math.min(math.max(poolSize, nToSelect), orderedRels.length)
