@@ -37,8 +37,9 @@ Design doc: https://docs.google.com/document/d/1HOaPL_HJzTbL2tVdzbTjhr5wxVvPe9e-
 
 ## Prerequisites:
 
-Data must be discretized in a range of [0, 255] in order to transform this data into a more manageable data type. It can be done using MDLP discretizer for Spark, which can be found in: http://spark-packages.org/package/sramirez/spark-MDLP-discretization.
-It is used breeze.linalg.Vector[Byte] in order to obtain a better performance in the whole process of selection.
+Data must be discretized. Each LabeledPoint has to be a Integer in range [0, 255], despite of using the Double format.
+It can be done using MDLP discretizer for Spark, which can be found in: http://spark-packages.org/package/sramirez/spark-MDLP-discretization.
+This reason behind this decision is to achive a better performance in the whole process of selection by simplifying the storing and the transferring of complex data.
 
 ## Contributors
 
