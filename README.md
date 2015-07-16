@@ -13,7 +13,7 @@ This work has associated two submitted contributions to international journals w
 - kddb dataset: http://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary.html#kdd2010%20%28bridge%20to%20algebra%29. 20M instances and almost 30M of attributes.
 
 ## Example: 
-
+	import org.apache.spark.mllib.feature._
 	val criterion = new InfoThCriterionFactory("mrmr")
 	val nToSelect = 100
 	val nPartitions = 100
