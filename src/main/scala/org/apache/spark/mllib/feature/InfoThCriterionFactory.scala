@@ -32,8 +32,13 @@ package org.apache.spark.mllib.feature
  * 
  */
 
-class InfoThCriterionFactory(val criterion: String) extends Serializable {
+class InfoThCriterionFactory(
+    val criterion: String, 
+    val beta: Float = 0.0f, 
+    val alpha: Float = 0.0f) extends Serializable {
 
+  val MIM = "mim"
+  val MIFS = "mifs"
   val JMI  = "jmi"
   val MRMR = "mrmr"
   val ICAP = "icap"
@@ -45,6 +50,8 @@ class InfoThCriterionFactory(val criterion: String) extends Serializable {
    */
   def getCriterion: InfoThCriterion = {
     criterion match {
+      case MIM => new Mim
+      case MIFS => new Mifs(beta)
       case JMI  => new Jmi
       case MRMR => new Mrmr
       case ICAP => new Icap
