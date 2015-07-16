@@ -16,16 +16,16 @@ This work has associated two submitted contributions to international journals w
 
 	val criterion = new InfoThCriterionFactory("mrmr")
 	val nToSelect = 100
-	val nPool = 100 // 0 -> w/o pool
+	val nPartitions = 100
 	
 	println("*** FS criterion: " + criterion.getCriterion.toString)
 	println("*** Number of features to select: " + nToSelect)
-	println("*** Pool size: " + nPool)
+	println("*** Number of partitions: " + nPartitions)
 	
 	val featureSelector = InfoThSelector.train(criterion, 
 	      	data, // RDD[LabeledPoint]
       		nToSelect, // number of features to select
-	      nPool) // number of features in pool
+	      	nPartitions) // number of partitions
     	featureSelector
 	
 	val reduced = data.map(i => LabeledPoint(i.label, featureSelector.transform(i.features)))
