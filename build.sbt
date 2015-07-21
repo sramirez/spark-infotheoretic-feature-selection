@@ -1,3 +1,5 @@
+sbt.version := "0.13.8"
+
 name := "spark-infotheoretic-feature-selection"
 
 version := "0.1"
