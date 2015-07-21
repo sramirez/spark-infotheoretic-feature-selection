@@ -3,6 +3,8 @@ An Information Theoretic Feature Selection Framework
 
 The present framework implements Feature Selection (FS) on Spark for its application on Big Data problems. This package contains a generic implementation of greedy Information Theoretic Feature Selection methods. The implementation is based on the common theoretic framework presented in [1]. Implementations of mRMR, InfoGain, JMI and other commonly used FS filters are provided. In addition, the framework can be extended with other criteria provided by the user as long as the process complies with the framework proposed in [1].
 
+Spark package: http://spark-packages.org/package/sramirez/spark-infotheoretic-feature-selection
+
 ## Main features:
 * Support for sparse data and high-dimensional datasets (millions of features).
 * Improved performance (less than 1 minute per iteration for datasets like ECBDL14 and kddb with 400 cores).
@@ -13,19 +15,19 @@ This work has associated two submitted contributions to international journals w
 - kddb dataset: http://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary.html#kdd2010%20%28bridge%20to%20algebra%29. 20M instances and almost 30M of attributes.
 
 ## Example: 
-
+	import org.apache.spark.mllib.feature._
 	val criterion = new InfoThCriterionFactory("mrmr")
 	val nToSelect = 100
-	val nPool = 100 // 0 -> w/o pool
+	val nPartitions = 100
 	
 	println("*** FS criterion: " + criterion.getCriterion.toString)
 	println("*** Number of features to select: " + nToSelect)
-	println("*** Pool size: " + nPool)
+	println("*** Number of partitions: " + nPartitions)
 	
 	val featureSelector = InfoThSelector.train(criterion, 
 	      	data, // RDD[LabeledPoint]
       		nToSelect, // number of features to select
-	      nPool) // number of features in pool
+	      	nPartitions) // number of partitions
     	featureSelector
 	
 	val reduced = data.map(i => LabeledPoint(i.label, featureSelector.transform(i.features)))
