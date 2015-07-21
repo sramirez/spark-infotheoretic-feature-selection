@@ -84,8 +84,8 @@ class InfoThSelector private[feature] (val criterionFactory: FT) extends Seriali
     }
     
     // Print most relevant features
-    val strRels = relevances.sortBy(_._2, false).take(nToSelect)
-      .map({case (f, mi) => (f + 1) + "\t" + "%.4f" format mi})
+    val topByRelevance = relevances.sortBy(_._2, false).take(nToSelect)
+    val strRels = topByRelevance.map({case (f, mi) => (f + 1) + "\t" + "%.4f" format mi})
       .mkString("\n")
     println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels) 
     
@@ -93,8 +93,13 @@ class InfoThSelector private[feature] (val criterionFactory: FT) extends Seriali
     val (max, mid) = pool.zipWithIndex.maxBy(_._1.relevance)
     var selected = Seq(F(mid, max.score))
     pool(mid).setValid(false)
-    var moreFeat = true
+      
+    // MIM does not use redundancy, so for this criterion all the features are selected now
+    if (criterionFactory.getCriterion.toString == "MIM") {
+      selected = topByRelevance.map({case (id, relv) => F(id, relv)}).reverse
+    }
     
+    var moreFeat = true
     // Iterative process for redundancy and conditional redundancy
     while (selected.size < nToSelect && moreFeat) {
 
