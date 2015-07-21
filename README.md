@@ -3,6 +3,8 @@ An Information Theoretic Feature Selection Framework
 
 The present framework implements Feature Selection (FS) on Spark for its application on Big Data problems. This package contains a generic implementation of greedy Information Theoretic Feature Selection methods. The implementation is based on the common theoretic framework presented in [1]. Implementations of mRMR, InfoGain, JMI and other commonly used FS filters are provided. In addition, the framework can be extended with other criteria provided by the user as long as the process complies with the framework proposed in [1].
 
+Spark package: http://spark-packages.org/package/sramirez/spark-infotheoretic-feature-selection
+
 ## Main features:
 * Support for sparse data and high-dimensional datasets (millions of features).
 * Improved performance (less than 1 minute per iteration for datasets like ECBDL14 and kddb with 400 cores).
