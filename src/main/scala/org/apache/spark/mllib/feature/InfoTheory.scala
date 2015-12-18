@@ -68,8 +68,10 @@ class InfoTheory extends Serializable {
         for(j <- 0 until m.cols){
           val pxy = m(i, j).toFloat / nInstances
           val py = byProb.value(j); val px = xProb(i)
-          if(pxy != 0 && px != 0 && py != 0) // To avoid NaNs
+          // To avoid NaNs
+          if(pxy != 0 && px != 0 && py != 0){
             mi += pxy * (math.log(pxy / (px * py)) / math.log(2))
+          }             
         }
       } 
       mi.toFloat        
@@ -117,12 +119,14 @@ class InfoTheory extends Serializable {
           for(y <- 0 until m(z).cols) {
             val pz = zProb.value(z); val pxyz = (m(z)(x, y).toFloat / n) / pz
             val pxz = xzProb(z)(x) / pz; val pyz = yzProb.value(y, z) / pz
-            if(pxz != 0 && pyz != 0 && pxyz != 0)
+            if(pxz != 0 && pyz != 0 && pxyz != 0) {
               cmi += pz * pxyz * (math.log(pxyz / (pxz * pyz)) / math.log(2))
+            }              
             if (z == 0) { // Do MI computations only once
               val px = xProb(x); val pxy = xyProb(x, y); val py = yProb.value(y)
-              if(pxy != 0 && px != 0 && py != 0)
+              if(pxy != 0 && px != 0 && py != 0) {
                 mi += pxy * (math.log(pxy / (px * py)) / math.log(2))
+              }                
             }
           }            
         }
@@ -165,10 +169,10 @@ class InfoTheorySparse (
     val histograms = computeHistograms(data, 
       fixedCol, fixedColHistogram)
     val jointTable = histograms.mapValues(_.map(_.toFloat / nInstances))
-      .partitionBy(new HashPartitioner(400))
+      //.partitionBy(new HashPartitioner(400))
       .cache()
     val marginalTable = jointTable.mapValues(h => sum(h(*, ::)).toDenseVector)
-      .partitionBy(new HashPartitioner(400))
+      //.partitionBy(new HashPartitioner(400))
       .cache()
     
     // Remove the class attribute from the computations
@@ -332,14 +336,15 @@ class InfoTheorySparse (
  *
  */
 class InfoTheoryDense (
-    val data: RDD[(Int, (Int, Array[Byte]))], 
+    val data: RDD[(Int, Array[Byte])], 
     fixedFeat: Int,
     val nInstances: Long,      
-    val nFeatures: Int) extends InfoTheory with Serializable {
+    val nFeatures: Int,
+    val originalNPart: Int) extends InfoTheory with Serializable {
     
   // Count the number of distinct values per feature to limit the size of matrices
   val counterByFeat = {
-      val counter = data.mapValues({ case (_, v) => if(!v.isEmpty) v.max + 1 else 1})
+      val counter = data.mapValues(v => if(!v.isEmpty) v.max + 1 else 1)
           .reduceByKey((m1, m2) => if(m1 > m2) m1 else m2)
           .collectAsMap()
           .toMap
@@ -348,9 +353,10 @@ class InfoTheoryDense (
   
   // Broadcast fixed attribute
   val fixedCol = {
-    val yvals = data.lookup(fixedFeat)
+    val min = fixedFeat * originalNPart
+    val yvals = data.filterByRange(min, min + originalNPart - 1).collect()
     val ycol = Array.ofDim[Array[Byte]](yvals.length)
-    yvals.foreach({ case (b, v) => ycol(b) = v })
+    yvals.foreach({ case (b, v) => ycol(b % originalNPart) = v })
     fixedFeat -> data.context.broadcast(ycol)
   }
   
@@ -358,10 +364,10 @@ class InfoTheoryDense (
   val (marginalProb, jointProb, relevances) = {
     val histograms = computeHistograms(data, fixedCol)
     val jointTable = histograms.mapValues(_.map(_.toFloat / nInstances))
-      .partitionBy(new HashPartitioner(400))
+      //.partitionBy(new HashPartitioner(400))
       .cache()
     val marginalTable = jointTable.mapValues(h => sum(h(*, ::)).toDenseVector)
-      .partitionBy(new HashPartitioner(400))
+      //.partitionBy(new HashPartitioner(400))
       .cache()
     
     // Remove output feature from the computations and compute MI with respect to the fixed var
@@ -384,9 +390,10 @@ class InfoTheoryDense (
   def getRedundancies(varY: Int) = {
     
     // Get and broadcast Y and the fixed variable (conditional)
-    val yvals = data.lookup(varY)
+    val min = fixedFeat * originalNPart
+    val yvals = data.filterByRange(min, min + originalNPart - 1).collect()
     var ycol = Array.ofDim[Array[Byte]](yvals.length)
-    yvals.foreach({ case (b, v) => ycol(b) = v })
+    yvals.foreach({ case (b, v) => ycol(b % originalNPart) = v })
     val (varZ, _) = fixedCol
 
     // Compute histograms for all variables with respect to Y and the fixed variable
@@ -412,7 +419,7 @@ class InfoTheoryDense (
    * 
    */
   private def computeHistograms(
-      data:  RDD[(Int, (Int, Array[Byte]))],
+      data:  RDD[(Int, Array[Byte])],
       ycol: (Int, Broadcast[Array[Array[Byte]]])) = {
     
     val maxSize = 256; val bycol = ycol._2
@@ -422,7 +429,9 @@ class InfoTheoryDense (
     data.mapPartitions({ it =>
       var result = Map.empty[Int, BDM[Long]]
       // For each feature and block, this generates a histogram (a single matrix)
-      for((feat, (block, arr)) <- it) {
+      for((index, arr) <- it) {
+        val feat = index / originalNPart
+        val block = index % originalNPart
         val m = result.getOrElse(feat, 
             BDM.zeros[Long](counter.value.getOrElse(feat, maxSize).toInt, ys)) 
         for(i <- 0 until arr.length) 
@@ -445,7 +454,7 @@ class InfoTheoryDense (
    * 
    */
   private def computeConditionalHistograms(
-    data: RDD[(Int, (Int, Array[Byte]))],
+    data: RDD[(Int, Array[Byte])],
     ycol: (Int, Array[Array[Byte]]),
     zcol: (Int, Broadcast[Array[Array[Byte]]])) = {
     
@@ -458,7 +467,9 @@ class InfoTheoryDense (
       val result = data.mapPartitions({ it =>
         var result = Map.empty[Int, BDV[BDM[Long]]]
         // For each feature and block, this generates a 3-dim histogram (several matrices)
-        for((feat, (block, arr)) <- it) {
+      for((index, arr) <- it) {
+          val feat = index / originalNPart
+          val block = index % originalNPart
           // We create a vector (z) of matrices (x,y) to represent a 3-dim matrix
           val m = result.getOrElse(feat, 
               BDV.fill[BDM[Long]](zs){BDM.zeros[Long](bcounter.value.getOrElse(feat, 256), ys)})
@@ -511,11 +522,12 @@ object InfoTheory {
    * @return  An info-theory object which contains the relevances and some proportions cached.
    * 
    */
-  def initializeDense(data: RDD[(Int, (Int, Array[Byte]))], 
+  def initializeDense(data: RDD[(Int, Array[Byte])], 
     fixedFeat: Int,
     nInstances: Long,      
-    nFeatures: Int) = {
-      new InfoTheoryDense(data, fixedFeat, nInstances, nFeatures)
+    nFeatures: Int,
+    originalNPart: Int) = {
+      new InfoTheoryDense(data, fixedFeat, nInstances, nFeatures, originalNPart)
   }
   
   private val log2 = { x: Double => math.log(x) / math.log(2) } 
