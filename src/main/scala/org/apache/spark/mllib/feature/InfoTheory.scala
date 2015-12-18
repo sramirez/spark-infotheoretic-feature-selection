@@ -390,7 +390,7 @@ class InfoTheoryDense (
   def getRedundancies(varY: Int) = {
     
     // Get and broadcast Y and the fixed variable (conditional)
-    val min = fixedFeat * originalNPart
+    val min = varY * originalNPart
     val yvals = data.filterByRange(min, min + originalNPart - 1).collect()
     var ycol = Array.ofDim[Array[Byte]](yvals.length)
     yvals.foreach({ case (b, v) => ycol(b % originalNPart) = v })

@@ -244,7 +244,7 @@ class InfoThSelector private[feature] (val criterionFactory: FT) extends Seriali
     val out = selected.map{case F(feat, rel) => 
         (feat + 1) + "\t" + "%.4f".format(rel)
       }.mkString("\n")
-    println("\n*** mRMR features ***\nFeature\tScore\n" + out)
+    logInfo("\n*** Selected features ***\nFeature\tScore\n" + out)
     // Features must be sorted
     new SelectorModel(selected.map{case F(feat, rel) => feat}.sorted.toArray)
   }
