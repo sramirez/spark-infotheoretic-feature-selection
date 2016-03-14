@@ -304,10 +304,6 @@ class InfoThSelector (
       logWarning("The input data is not directly cached, which may hurt performance if its"
         + " parent RDDs are also uncached.")
     }
-    
-    if(data.mapPartitions(it => Seq(it.size).toIterator).distinct().count() > 1) {
-      logError("The dataset must be split in equal-sized partitions.")
-    }
       
     // Feature vector must be composed of bytes, not the class
     val requireByteValues = (v: Vector) => {        
@@ -336,9 +332,8 @@ class InfoThSelector (
     val colData = if(dense) {
       
       val np = if(numPartitions == 0) nFeatures else numPartitions
-      if(np > nFeatures) {
-        logWarning("Number of partitions should be equal or less than the number of features."
-          + " At least, less than 2x the number of features.")
+      if(data.mapPartitions(it => Seq(it.size).toIterator).distinct().count() > 1) {
+      	logError("The dataset must be split in equal-sized partitions.")
       }
       
       val classMap = data.map(_.label).distinct.collect()
