@@ -6,6 +6,8 @@ The present framework implements Feature Selection (FS) on Spark for its applica
 Spark package: http://spark-packages.org/package/sramirez/spark-infotheoretic-feature-selection
 
 ## Main features:
+
+* Version for new ml library.
 * Support for sparse data and high-dimensional datasets (millions of features).
 * Improved performance (less than 1 minute per iteration for datasets like ECBDL14 and kddb with 400 cores).
 
@@ -13,8 +15,21 @@ This work has associated two submitted contributions to international journals w
 
 - A dataset selected for the GECCO-2014 in Vancouver, July 13th, 2014 competition, which comes from the Protein Structure Prediction field (http://cruncher.ncl.ac.uk/bdcomp/). We have created a oversampling version of this dataset with 64 million instances, 631 attributes, 2 classes.
 - kddb dataset: http://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary.html#kdd2010%20%28bridge%20to%20algebra%29. 20M instances and almost 30M of attributes.
+- 
 
-## Example: 
+## Example (ml): 
+	import org.apache.spark.ml.feature._
+	val selector = new InfoThSelector()
+		.setSelectCriterion("mrmr")
+	      	.setNPartitions(100)
+	      	.setNumTopFeatures(10)
+	      	.setFeaturesCol("features")
+	      	.setLabelCol("class")
+	      	.setOutputCol("selectedFeatures")
+   
+	val result = selector.fit(df).transform(df)
+
+## Example (MLLIB): 
 	import org.apache.spark.mllib.feature._
 	val criterion = new InfoThCriterionFactory("mrmr")
 	val nToSelect = 100
