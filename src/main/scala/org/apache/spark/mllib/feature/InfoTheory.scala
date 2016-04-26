@@ -344,8 +344,10 @@ class InfoTheoryDense (
     
   // Count the number of distinct values per feature to limit the size of matrices
   val counterByFeat = {
-      val counter = data.mapValues(v => if(!v.isEmpty) v.max + 1 else 1)
-          .reduceByKey((m1, m2) => if(m1 > m2) m1 else m2)
+      val counter = data.map{case (k, v) => 
+          val max = if(!v.isEmpty) v.max + 1 else 1
+          (k / originalNPart) -> max
+        }.reduceByKey((m1, m2) => if(m1 > m2) m1 else m2)
           .collectAsMap()
           .toMap
       data.context.broadcast(counter)
@@ -392,6 +394,9 @@ class InfoTheoryDense (
     // Get and broadcast Y and the fixed variable (conditional)
     val min = varY * originalNPart
     val yvals = data.filterByRange(min, min + originalNPart - 1).collect()
+    
+
+    
     var ycol = Array.ofDim[Array[Byte]](yvals.length)
     yvals.foreach({ case (b, v) => ycol(b % originalNPart) = v })
     val (varZ, _) = fixedCol

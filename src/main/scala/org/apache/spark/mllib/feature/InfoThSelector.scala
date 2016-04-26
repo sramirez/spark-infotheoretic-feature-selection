@@ -19,13 +19,10 @@ package org.apache.spark.mllib.feature
 
 
 import scala.collection.mutable.ArrayBuilder
-
 import org.json4s._
 import org.json4s.JsonDSL._
 import org.json4s.jackson.JsonMethods._
-
 import breeze.linalg.{DenseVector => BDV, SparseVector => BSV, Vector => BV, DenseMatrix => BDM}
-
 import org.apache.spark.annotation.Since
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.Logging
@@ -42,6 +39,7 @@ import org.apache.spark.HashPartitioner
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkException
 import org.apache.spark.sql.{Row, SQLContext}
+import org.apache.spark.Partitioner
 
 
 /**
@@ -316,8 +314,9 @@ class InfoThSelector (
       val condition = (value: Double) => value <= Byte.MaxValue && 
         value >= Byte.MinValue && value % 1 == 0.0
       if (!values.forall(condition(_))) {
+        val str = values.mkString(",")
         throw new SparkException(
-            s"Info-Theoretic Framework requires positive values in range [0, 255]")
+            s"Info-Theoretic Framework requires positive values in range [0, 255] in $str")
       }           
     }
         
@@ -331,36 +330,38 @@ class InfoThSelector (
     // Start the transformation to the columnar format
     val colData = if(dense) {
       
-      val np = if(numPartitions == 0) nFeatures else numPartitions
-      if(data.mapPartitions(it => Seq(it.size).toIterator).distinct().count() > 1) {
-      	logError("The dataset must be split in equal-sized partitions.")
-      }
-      
+      val originalNPart = data.partitions.size
       val classMap = data.map(_.label).distinct.collect()
         .zipWithIndex.map(t => t._1 -> t._2.toByte)
         .toMap
       
       // Transform data into a columnar format by transposing the local matrix in each partition
-      val columnarData = data.mapPartitionsWithIndex({ (index, it) =>
-        val data = it.toArray
-        val mat = Array.ofDim[Byte](nFeatures, data.length)
-        var j = 0
-        for(reg <- data) {
-          requireByteValues(reg.features)
-          for(i <- 0 until reg.features.size) mat(i)(j) = reg.features(i).toByte
-          mat(reg.features.size)(j) = classMap(reg.label)
-          j += 1
-        }
+      val eqDistributedData = data.zipWithIndex().map(_.swap).partitionBy(new ExactPartitioner(originalNPart, nInstances))
+      
+      val columnarData = eqDistributedData.mapPartitionsWithIndex({ (index, it) =>
+          val data = it.toArray.map(_._2)
+          val mat = Array.ofDim[Byte](nFeatures, data.length)
+          var j = 0
+          for(reg <- data) {
+            requireByteValues(reg.features)
+            for(i <- 0 until reg.features.size) mat(i)(j) = reg.features(i).toByte
+            mat(reg.features.size)(j) = classMap(reg.label)
+            j += 1
+          }
         
-        val chunks = for(i <- 0 until nFeatures) yield ((i * numPartitions + index) -> mat(i))
+        val chunks = for(i <- 0 until nFeatures) yield ((i * originalNPart + index) -> mat(i))
         chunks.toIterator
-      })      
+      })            
       
       // Sort to group all chunks for the same feature closely. 
       // It will avoid to shuffle too much histograms
+      val np = if(numPartitions == 0) nFeatures else numPartitions
+      if(np > nFeatures) {
+        logWarning("Number of partitions should be equal or less than the number of features."
+          + " At least, less than 2x the number of features.")
+      }
       val denseData = columnarData.sortByKey(numPartitions = np).persist(StorageLevel.MEMORY_ONLY)
-      
-      ColumnarData(denseData, null, true, data.partitions.size)      
+      ColumnarData(denseData, null, true, originalNPart)      
     } else {      
       
       val np = if(numPartitions == 0) data.conf.getInt("spark.default.parallelism", 750) else numPartitions
@@ -406,5 +407,18 @@ class InfoThSelector (
     logInfo("\n*** Selected features ***\nFeature\tScore\n" + out)
     // Features must be sorted
     new InfoThSelectorModel(selected.map{case F(feat, rel) => feat}.sorted.toArray)
+  }
+}
+
+class ExactPartitioner(
+    partitions: Int,
+    elements: Long)
+  extends Partitioner {
+
+  override def numPartitions: Int = partitions
+  
+  override def getPartition(key: Any): Int = {
+    val k = key.asInstanceOf[Long]
+    return (k * partitions / elements).toInt
   }
 }
