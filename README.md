@@ -15,7 +15,6 @@ This work has associated two submitted contributions to international journals w
 
 - A dataset selected for the GECCO-2014 in Vancouver, July 13th, 2014 competition, which comes from the Protein Structure Prediction field (http://cruncher.ncl.ac.uk/bdcomp/). We have created a oversampling version of this dataset with 64 million instances, 631 attributes, 2 classes.
 - kddb dataset: http://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary.html#kdd2010%20%28bridge%20to%20algebra%29. 20M instances and almost 30M of attributes.
-- 
 
 ## Example (ml): 
 	import org.apache.spark.ml.feature._
