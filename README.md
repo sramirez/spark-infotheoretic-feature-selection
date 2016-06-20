@@ -38,7 +38,7 @@ This work has associated two submitted contributions to international journals w
 	println("*** Number of features to select: " + nToSelect)
 	println("*** Number of partitions: " + nPartitions)
 	
-	val featureSelector = InfoThSelector(criterion, nToSelect, nPartitions).fit(data)
+	val featureSelector = new InfoThSelector(criterion, nToSelect, nPartitions).fit(data)
 	
 	val reduced = data.map(i => LabeledPoint(i.label, featureSelector.transform(i.features)))
 	reduced.first()
