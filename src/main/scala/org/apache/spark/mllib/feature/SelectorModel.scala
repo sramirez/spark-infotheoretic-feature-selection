@@ -18,7 +18,7 @@
 package org.apache.spark.mllib.feature
 
 import org.apache.spark.annotation.Experimental
-import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.mllib.linalg.{ Vector, Vectors }
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.stat.Statistics
 import org.apache.spark.rdd.RDD
@@ -30,14 +30,14 @@ import org.apache.spark.rdd.RDD
  * @param selectedFeatures list of indices to select (filter). Must be ordered asc
  */
 @Experimental
-class SelectorModel (val selectedFeatures: Array[Int]) extends VectorTransformer {
+class SelectorModel(val selectedFeatures: Array[Int]) extends VectorTransformer {
 
   require(isSorted(selectedFeatures), "Array has to be sorted asc")
 
   protected def isSorted(array: Array[Int]): Boolean = {
     var i = 1
     while (i < array.length) {
-      if (array(i) < array(i-1)) return false
+      if (array(i) < array(i - 1)) return false
       i += 1
     }
     true
@@ -52,6 +52,5 @@ class SelectorModel (val selectedFeatures: Array[Int]) extends VectorTransformer
   override def transform(vector: Vector): Vector = {
     FeatureUtils.compress(vector, selectedFeatures)
   }
-
 
 }

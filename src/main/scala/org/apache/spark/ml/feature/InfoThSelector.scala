@@ -18,47 +18,53 @@
 package org.apache.spark.ml.feature
 
 import org.apache.hadoop.fs.Path
-import org.apache.spark.annotation.{Experimental, Since}
+
+import org.apache.spark.annotation.{ Since, Experimental }
 import org.apache.spark.ml._
-import org.apache.spark.ml.attribute.{AttributeGroup, _}
+import org.apache.spark.ml.attribute.{ AttributeGroup, _ }
+import org.apache.spark.ml.linalg.{ Vector, VectorUDT }
 import org.apache.spark.ml.param._
 import org.apache.spark.ml.param.shared._
 import org.apache.spark.ml.util._
 import org.apache.spark.mllib.feature
-import org.apache.spark.mllib.linalg.{Vector, VectorUDT}
-import org.apache.spark.mllib.regression.LabeledPoint
+import org.apache.spark.mllib.linalg.{ Vectors => OldVectors }
+import org.apache.spark.mllib.regression.{ LabeledPoint => OldLabeledPoint }
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{DoubleType, StructField, StructType}
+import org.apache.spark.sql.types.{ DoubleType, StructField, StructType }
+
 import org.apache.spark.mllib.feature.InfoThCriterionFactory
 
 /**
  * Params for [[InfoThSelector]] and [[InfoThSelectorModel]].
  */
 private[feature] trait InfoThSelectorParams extends Params
-  with HasFeaturesCol with HasOutputCol with HasLabelCol {
+    with HasFeaturesCol with HasOutputCol with HasLabelCol {
 
   /**
    * Information Theoretic criterion used to rank the features. The default value is the criterion mRMR.
+   *
    * @group param
    */
-  
+
   val MIM = "mim"
   val MIFS = "mifs"
-  val JMI  = "jmi"
+  val JMI = "jmi"
   val MRMR = "mrmr"
   val ICAP = "icap"
   val CMIM = "cmim"
-  val IF   = "if"
+  val IF = "if"
 
   final val selectCriterion = new Param[String](this, "selectCriterion",
     "Information Theoretic criterion used to rank the features. The criterion to be chosen are: (mim, mifs, jmi, mrmr, icap, cmim, if).")
   setDefault(selectCriterion -> "mrmr")
-  
+
   /**
    * Number of features that selector will select (ordered by statistic value descending). If the
    * number of features is < numTopFeatures, then this will select all features. The default value
    * of numTopFeatures is 50.
+   *
    * @group param
    */
   final val numTopFeatures = new IntParam(this, "numTopFeatures",
@@ -66,20 +72,21 @@ private[feature] trait InfoThSelectorParams extends Params
       " number of features is < numTopFeatures, then this will select all features.",
     ParamValidators.gtEq(1))
   setDefault(numTopFeatures -> 25)
-  
+
   /**
    * Number of partitions to use after the data matrix is transformed to a columnar format. The default value
    * is 0, which means that the default level of parallelism is used.
+   *
    * @group param
    */
   final val nPartitions = new IntParam(this, "nPartitions",
     "Number of partitions to use after the data matrix is transformed to a columnar format.",
     ParamValidators.gtEq(0))
   setDefault(nPartitions -> 0)
-  
+
   /** @group getParam */
   def getSelectCriterion: String = $(selectCriterion)
-  
+
   /** @group getParam */
   def getNumTopFeatures: Int = $(numTopFeatures)
 
@@ -93,45 +100,54 @@ private[feature] trait InfoThSelectorParams extends Params
  * categorical label.
  */
 @Experimental
-final class InfoThSelector(override val uid: String)
-  extends Estimator[InfoThSelectorModel] with InfoThSelectorParams with DefaultParamsWritable {
+final class InfoThSelector @Since("1.6.0") (@Since("1.6.0") override val uid: String)
+    extends Estimator[InfoThSelectorModel] with InfoThSelectorParams with DefaultParamsWritable {
 
+  @Since("1.6.0")
   def this() = this(Identifiable.randomUID("InfoThSelector"))
 
   /** @group setParam */
+  @Since("1.6.0")
   def setSelectCriterion(value: String): this.type = set(selectCriterion, value)
-  
+
   /** @group setParam */
+  @Since("1.6.0")
   def setNumTopFeatures(value: Int): this.type = set(numTopFeatures, value)
-  
+
   /** @group setParam */
+  @Since("1.6.0")
   def setNPartitions(value: Int): this.type = set(nPartitions, value)
-  
+
   /** @group setParam */
+  @Since("1.6.0")
   def setFeaturesCol(value: String): this.type = set(featuresCol, value)
 
   /** @group setParam */
+  @Since("1.6.0")
   def setOutputCol(value: String): this.type = set(outputCol, value)
 
   /** @group setParam */
+  @Since("1.6.0")
   def setLabelCol(value: String): this.type = set(labelCol, value)
 
-  override def fit(dataset: DataFrame): InfoThSelectorModel = {
+  @Since("2.0.0")
+  override def fit(dataset: Dataset[_]): InfoThSelectorModel = {
     transformSchema(dataset.schema, logging = true)
-    val input = dataset.select($(labelCol), $(featuresCol)).map {
-      case Row(label: Double, features: Vector) =>
-        LabeledPoint(label, features)
-    }
+    val input: RDD[OldLabeledPoint] =
+      dataset.select(col($(labelCol)).cast(DoubleType), col($(featuresCol))).rdd.map {
+        case Row(label: Double, features: Vector) =>
+          OldLabeledPoint(label, OldVectors.fromML(features))
+      }
 
     val InfoThSelector = new feature.InfoThSelector(
-        new InfoThCriterionFactory($(selectCriterion)),
-        $(numTopFeatures),
-        $(nPartitions)).fit(input)
+      new InfoThCriterionFactory($(selectCriterion)),
+      $(numTopFeatures),
+      $(nPartitions)
+    ).fit(input)
     copyValues(new InfoThSelectorModel(uid, InfoThSelector).setParent(this))
   }
 
   override def transformSchema(schema: StructType): StructType = {
-    validateParams()
     SchemaUtils.checkColumnType(schema, $(featuresCol), new VectorUDT)
     SchemaUtils.checkColumnType(schema, $(labelCol), DoubleType)
     SchemaUtils.appendColumn(schema, $(outputCol), new VectorUDT)
@@ -153,9 +169,10 @@ object InfoThSelector extends DefaultParamsReadable[InfoThSelector] {
  */
 @Experimental
 final class InfoThSelectorModel private[ml] (
-    override val uid: String,
-    private val InfoThSelector: feature.InfoThSelectorModel)
-  extends Model[InfoThSelectorModel] with InfoThSelectorParams with MLWritable {
+  @Since("1.6.0") override val uid: String,
+  private val InfoThSelector: feature.InfoThSelectorModel
+)
+    extends Model[InfoThSelectorModel] with InfoThSelectorParams with MLWritable {
 
   import InfoThSelectorModel._
 
@@ -171,15 +188,19 @@ final class InfoThSelectorModel private[ml] (
   /** @group setParam */
   def setLabelCol(value: String): this.type = set(labelCol, value)
 
-  override def transform(dataset: DataFrame): DataFrame = {
+  override def transform(dataset: Dataset[_]): DataFrame = {
     val transformedSchema = transformSchema(dataset.schema, logging = true)
     val newField = transformedSchema.last
-    val selector = udf { InfoThSelector.transform _ }
+
+    // TODO: Make the transformer natively in ml framework to avoid extra conversion.
+    val transformer: Vector => Vector = v => InfoThSelector.transform(OldVectors.fromML(v)).asML
+
+    val selector = udf(transformer)
+
     dataset.withColumn($(outputCol), selector(col($(featuresCol))), newField.metadata)
   }
 
   override def transformSchema(schema: StructType): StructType = {
-    validateParams()
     SchemaUtils.checkColumnType(schema, $(featuresCol), new VectorUDT)
     val newField = prepOutputField(schema)
     val outputFields = schema.fields :+ newField
@@ -213,8 +234,7 @@ final class InfoThSelectorModel private[ml] (
 @Since("1.6.0")
 object InfoThSelectorModel extends MLReadable[InfoThSelectorModel] {
 
-  private[InfoThSelectorModel]
-  class InfoThSelectorModelWriter(instance: InfoThSelectorModel) extends MLWriter {
+  private[InfoThSelectorModel] class InfoThSelectorModelWriter(instance: InfoThSelectorModel) extends MLWriter {
 
     private case class Data(selectedFeatures: Seq[Int])
 
@@ -222,7 +242,7 @@ object InfoThSelectorModel extends MLReadable[InfoThSelectorModel] {
       DefaultParamsWriter.saveMetadata(instance, path, sc)
       val data = Data(instance.selectedFeatures.toSeq)
       val dataPath = new Path(path, "data").toString
-      sqlContext.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
+      sparkSession.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
     }
   }
 
@@ -233,7 +253,7 @@ object InfoThSelectorModel extends MLReadable[InfoThSelectorModel] {
     override def load(path: String): InfoThSelectorModel = {
       val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
       val dataPath = new Path(path, "data").toString
-      val data = sqlContext.read.parquet(dataPath).select("selectedFeatures").head()
+      val data = sparkSession.read.parquet(dataPath).select("selectedFeatures").head()
       val selectedFeatures = data.getAs[Seq[Int]](0).toArray
       val oldModel = new feature.InfoThSelectorModel(selectedFeatures)
       val model = new InfoThSelectorModel(metadata.uid, oldModel)

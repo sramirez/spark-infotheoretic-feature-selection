@@ -24,7 +24,7 @@ import org.apache.spark.mllib.linalg._
 
 /**
  * Feature utils object for selector methods.
- *  
+ *
  */
 
 @Experimental
@@ -68,7 +68,8 @@ object FeatureUtils {
         Vectors.dense(filterIndices.map(i => v.values(i)))
       case other =>
         throw new UnsupportedOperationException(
-          s"Only sparse and dense vectors are supported but got ${other.getClass}.")
+          s"Only sparse and dense vectors are supported but got ${other.getClass}."
+        )
     }
   }
 }

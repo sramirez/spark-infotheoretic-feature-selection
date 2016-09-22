@@ -17,30 +17,29 @@
 
 package org.apache.spark.mllib.feature
 
-
 import scala.collection.mutable.ArrayBuilder
+
 import org.json4s._
 import org.json4s.JsonDSL._
 import org.json4s.jackson.JsonMethods._
-import breeze.linalg.{DenseVector => BDV, SparseVector => BSV, Vector => BV, DenseMatrix => BDM}
-import org.apache.spark.annotation.Since
-import org.apache.spark.annotation.Experimental
-import org.apache.spark.Logging
-import org.apache.spark.mllib.feature.{InfoThCriterionFactory => FT}
-import org.apache.spark.mllib.feature.{InfoTheory => IT}
+
+import breeze.linalg.{ DenseVector => BDV, SparseVector => BSV, Vector => BV, DenseMatrix => BDM }
+import org.apache.spark.annotation.{ Since, Experimental }
+import org.apache.spark.mllib.feature.{ InfoThCriterionFactory => FT }
+import org.apache.spark.mllib.feature.{ InfoTheory => IT }
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.linalg.{Vector, DenseVector, SparseVector}
+import org.apache.spark.mllib.linalg.{ Vector, DenseVector, SparseVector }
 import org.apache.spark.mllib.stat.Statistics
-import org.apache.spark.mllib.util.{Loader, Saveable}
+import org.apache.spark.mllib.util.{ Loader, Saveable }
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.HashPartitioner
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkException
-import org.apache.spark.sql.{Row, SQLContext}
+import org.apache.spark.sql.{ Row, SparkSession }
 import org.apache.spark.Partitioner
-
+import org.apache.spark.internal.Logging
 
 /**
  * Information Theoretic Selector model.
@@ -48,8 +47,9 @@ import org.apache.spark.Partitioner
  * @param selectedFeatures list of indices to select (filter). Must be ordered asc
  */
 @Since("1.6.0")
-class InfoThSelectorModel (
-  val selectedFeatures: Array[Int]) extends VectorTransformer with Saveable {
+class InfoThSelectorModel @Since("1.6.0") (
+    @Since("1.6.0") val selectedFeatures: Array[Int]
+) extends VectorTransformer with Saveable {
 
   require(isSorted(selectedFeatures), "Array has to be sorted asc")
 
@@ -57,7 +57,7 @@ class InfoThSelectorModel (
     var i = 1
     val len = array.length
     while (i < len) {
-      if (array(i) < array(i-1)) return false
+      if (array(i) < array(i - 1)) return false
       i += 1
     }
     true
@@ -114,7 +114,8 @@ class InfoThSelectorModel (
         Vectors.dense(filterIndices.map(i => values(i)))
       case other =>
         throw new UnsupportedOperationException(
-          s"Only sparse and dense vectors are supported but got ${other.getClass}.")
+          s"Only sparse and dense vectors are supported but got ${other.getClass}."
+        )
     }
   }
 
@@ -126,29 +127,27 @@ class InfoThSelectorModel (
   override protected def formatVersion: String = "1.0"
 }
 
-
 object InfoThSelectorModel extends Loader[InfoThSelectorModel] {
   @Since("1.6.0")
   override def load(sc: SparkContext, path: String): InfoThSelectorModel = {
     InfoThSelectorModel.SaveLoadV1_0.load(sc, path)
   }
 
-  private[feature]
-  object SaveLoadV1_0 {
+  private[feature] object SaveLoadV1_0 {
 
     private val thisFormatVersion = "1.0"
 
     /** Model data for import/export */
     case class Data(feature: Int)
 
-    private[feature]
-    val thisClassName = "org.apache.spark.mllib.feature.InfoThSelectorModel"
+    private[feature] val thisClassName = "org.apache.spark.mllib.feature.InfoThSelectorModel"
 
     def save(sc: SparkContext, model: InfoThSelectorModel, path: String): Unit = {
-      val sqlContext = SQLContext.getOrCreate(sc)
-      import sqlContext.implicits._
+      val spark = SparkSession.builder().sparkContext(sc).getOrCreate()
+      import spark.implicits._
       val metadata = compact(render(
-        ("class" -> thisClassName) ~ ("version" -> thisFormatVersion)))
+        ("class" -> thisClassName) ~ ("version" -> thisFormatVersion)
+      ))
       sc.parallelize(Seq(metadata), 1).saveAsTextFile(Loader.metadataPath(path))
 
       // Create Parquet data.
@@ -161,18 +160,18 @@ object InfoThSelectorModel extends Loader[InfoThSelectorModel] {
 
     def load(sc: SparkContext, path: String): InfoThSelectorModel = {
       implicit val formats = DefaultFormats
-      val sqlContext = SQLContext.getOrCreate(sc)
+      val spark = SparkSession.builder().sparkContext(sc).getOrCreate()
       val (className, formatVersion, metadata) = Loader.loadMetadata(sc, path)
       assert(className == thisClassName)
       assert(formatVersion == thisFormatVersion)
 
-      val dataFrame = sqlContext.read.parquet(Loader.dataPath(path))
+      val dataFrame = spark.read.parquet(Loader.dataPath(path))
       val dataArray = dataFrame.select("feature")
 
       // Check schema explicitly since erasure makes it hard to use match-case for checking.
       Loader.checkSchema[Data](dataFrame.schema)
 
-      val features = dataArray.map {
+      val features = dataArray.rdd.map {
         case Row(feature: Int) => (feature)
       }.collect()
 
@@ -189,48 +188,52 @@ object InfoThSelectorModel extends Loader[InfoThSelectorModel] {
  * @param   nToSelect Maximum number of features to select
  * @param   numPartitions Number of partitions to structure the data.
  * @return  A feature selection model which contains a subset of selected features.
- * 
- * Note: LabeledPoint data must be integer values in double representation 
+ *
+ * Note: LabeledPoint data must be integer values in double representation
  * with a maximum of 256 distinct values. By doing so, data can be transformed
  * to byte class directly, making the selection process much more efficient.
- * 
- * Note: numPartitions must be less or equal to the number of features to achieve 
- * a better performance. Therefore, the number of histograms to be shuffled is reduced. 
- * 
+ *
+ * Note: numPartitions must be less or equal to the number of features to achieve
+ * a better performance. Therefore, the number of histograms to be shuffled is reduced.
+ *
  */
-
-class InfoThSelector (
-    val criterionFactory: FT, 
-    val nToSelect: Int = 25, 
-    val numPartitions: Int = 0) 
-  extends Serializable with Logging {
+@Since("1.6.0")
+class InfoThSelector @Since("1.6.0") (
+  val criterionFactory: FT,
+  val nToSelect: Int = 25,
+  val numPartitions: Int = 0
+)
+    extends Serializable with Logging {
 
   // Case class for criteria/feature
-  protected case class F(feat: Int, crit: Double) 
+  protected case class F(feat: Int, crit: Double)
   // Case class for columnar data (dense and sparse version)
-  private case class ColumnarData(dense: RDD[(Int, Array[Byte])], 
-      sparse: RDD[(Int, BV[Byte])],
-      isDense: Boolean,
-      originalNPart: Int)
+  private case class ColumnarData(
+    dense: RDD[(Int, Array[Byte])],
+    sparse: RDD[(Int, BV[Byte])],
+    isDense: Boolean,
+    originalNPart: Int
+  )
 
   /**
    * Performs a info-theory FS process.
-   * 
+   *
    * @param data Columnar data (last element is the class attribute).
    * @param nInstances Number of samples.
    * @param nFeatures Number of features.
    * @return A list with the most relevant features and its scores.
-   * 
+   *
    */
   private[feature] def selectFeatures(
-      data: ColumnarData,
-      nInstances: Long,
-      nFeatures: Int) = {
-    
+    data: ColumnarData,
+    nInstances: Long,
+    nFeatures: Int
+  ) = {
+
     val label = nFeatures - 1
     // Initialize all criteria with the relevance computed in this phase. 
     // It also computes and saved some information to be re-used.
-    val (it, relevances) = if(data.isDense) {
+    val (it, relevances) = if (data.isDense) {
       val it = InfoTheory.initializeDense(data.dense, label, nInstances, nFeatures, data.originalNPart)
       (it, it.relevances)
     } else {
@@ -242,27 +245,28 @@ class InfoThSelector (
     val pool = Array.fill[InfoThCriterion](nFeatures - 1) {
       val crit = criterionFactory.getCriterion.init(Float.NegativeInfinity)
       crit.setValid(false)
-    }    
-    relevances.collect().foreach{ case (x, mi) => 
-      pool(x) = criterionFactory.getCriterion.init(mi.toFloat) 
     }
-    
+    relevances.collect().foreach {
+      case (x, mi) =>
+        pool(x) = criterionFactory.getCriterion.init(mi.toFloat)
+    }
+
     // Print most relevant features
     val topByRelevance = relevances.sortBy(_._2, false).take(nToSelect)
-    val strRels = topByRelevance.map({case (f, mi) => (f + 1) + "\t" + "%.4f" format mi})
+    val strRels = topByRelevance.map({ case (f, mi) => (f + 1) + "\t" + "%.4f" format mi })
       .mkString("\n")
-    println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels) 
-    
+    println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels)
+
     // Get the maximum and initialize the set of selected features with it
     val (max, mid) = pool.zipWithIndex.maxBy(_._1.relevance)
     var selected = Seq(F(mid, max.score))
     pool(mid).setValid(false)
-      
+
     // MIM does not use redundancy, so for this criterion all the features are selected now
     if (criterionFactory.getCriterion.toString == "MIM") {
-      selected = topByRelevance.map({case (id, relv) => F(id, relv)}).reverse
+      selected = topByRelevance.map({ case (id, relv) => F(id, relv) }).reverse
     }
-    
+
     var moreFeat = true
     // Iterative process for redundancy and conditional redundancy
     while (selected.size < nToSelect && moreFeat) {
@@ -271,15 +275,16 @@ class InfoThSelector (
         case dit: InfoTheoryDense => dit.getRedundancies(selected.head.feat)
         case sit: InfoTheorySparse => sit.getRedundancies(selected.head.feat)
       }
-      
+
       // Update criteria with the new redundancy values
-      redundancies.collect().par.foreach({case (k, (mi, cmi)) =>
-         pool(k).update(mi.toFloat, cmi.toFloat) 
+      redundancies.collect().par.foreach({
+        case (k, (mi, cmi)) =>
+          pool(k).update(mi.toFloat, cmi.toFloat)
       })
-      
+
       // select the best feature and remove from the whole set of features
       val (max, maxi) = pool.par.zipWithIndex.filter(_._1.valid).maxBy(_._1)
-      if(maxi != -1){
+      if (maxi != -1) {
         selected = F(maxi, max.score) +: selected
         pool(maxi).setValid(false)
       } else {
@@ -291,132 +296,136 @@ class InfoThSelector (
 
   /**
    * Process in charge of transforming data in a columnar format and launching the FS process.
-   * 
+   *
    * @param data RDD of LabeledPoint.
    * @return A feature selection model which contains a subset of selected features.
-   * 
+   *
    */
-  def fit(data: RDD[LabeledPoint]): InfoThSelectorModel = {  
-    
+  def fit(data: RDD[LabeledPoint]): InfoThSelectorModel = {
+
     if (data.getStorageLevel == StorageLevel.NONE) {
       logWarning("The input data is not directly cached, which may hurt performance if its"
         + " parent RDDs are also uncached.")
     }
-      
+
     // Feature vector must be composed of bytes, not the class
-    val requireByteValues = (v: Vector) => {        
+    val requireByteValues = (v: Vector) => {
       val values = v match {
         case sv: SparseVector =>
           sv.values
         case dv: DenseVector =>
           dv.values
       }
-      val condition = (value: Double) => value <= Byte.MaxValue && 
+      val condition = (value: Double) => value <= Byte.MaxValue &&
         value >= Byte.MinValue && value % 1 == 0.0
       if (!values.forall(condition(_))) {
         val str = values.mkString(",")
         throw new SparkException(
-            s"Info-Theoretic Framework requires positive values in range [0, 255] in $str")
-      }           
+          s"Info-Theoretic Framework requires positive values in range [0, 255] in $str"
+        )
+      }
     }
-        
+
     // Get basic info
     val first = data.first
-    val dense = first.features.isInstanceOf[DenseVector]    
+    val dense = first.features.isInstanceOf[DenseVector]
     val nInstances = data.count()
     val nFeatures = first.features.size + 1
-    require(nToSelect < nFeatures)  
-    
+    require(nToSelect < nFeatures)
+
     // Start the transformation to the columnar format
-    val colData = if(dense) {
-      
+    val colData = if (dense) {
+
       val originalNPart = data.partitions.size
       val classMap = data.map(_.label).distinct.collect()
         .zipWithIndex.map(t => t._1 -> t._2.toByte)
         .toMap
-      
+
       // Transform data into a columnar format by transposing the local matrix in each partition
       val eqDistributedData = data.zipWithIndex().map(_.swap).partitionBy(new ExactPartitioner(originalNPart, nInstances))
-      
+
       val columnarData = eqDistributedData.mapPartitionsWithIndex({ (index, it) =>
-          val data = it.toArray.map(_._2)
-          val mat = Array.ofDim[Byte](nFeatures, data.length)
-          var j = 0
-          for(reg <- data) {
-            requireByteValues(reg.features)
-            for(i <- 0 until reg.features.size) mat(i)(j) = reg.features(i).toByte
-            mat(reg.features.size)(j) = classMap(reg.label)
-            j += 1
-          }
-        
-        val chunks = for(i <- 0 until nFeatures) yield ((i * originalNPart + index) -> mat(i))
+        val data = it.toArray.map(_._2)
+        val mat = Array.ofDim[Byte](nFeatures, data.length)
+        var j = 0
+        for (reg <- data) {
+          requireByteValues(reg.features)
+          for (i <- 0 until reg.features.size) mat(i)(j) = reg.features(i).toByte
+          mat(reg.features.size)(j) = classMap(reg.label)
+          j += 1
+        }
+
+        val chunks = for (i <- 0 until nFeatures) yield ((i * originalNPart + index) -> mat(i))
         chunks.toIterator
-      })            
-      
+      })
+
       // Sort to group all chunks for the same feature closely. 
       // It will avoid to shuffle too much histograms
-      val np = if(numPartitions == 0) nFeatures else numPartitions
-      if(np > nFeatures) {
+      val np = if (numPartitions == 0) nFeatures else numPartitions
+      if (np > nFeatures) {
         logWarning("Number of partitions should be equal or less than the number of features."
           + " At least, less than 2x the number of features.")
       }
       val denseData = columnarData.sortByKey(numPartitions = np).persist(StorageLevel.MEMORY_ONLY)
-      ColumnarData(denseData, null, true, originalNPart)      
-    } else {      
-      
-      val np = if(numPartitions == 0) data.conf.getInt("spark.default.parallelism", 750) else numPartitions
+      ColumnarData(denseData, null, true, originalNPart)
+    } else {
+
+      val np = if (numPartitions == 0) data.conf.getInt("spark.default.parallelism", 750) else numPartitions
       val classMap = data.map(_.label).distinct.collect()
         .zipWithIndex.map(t => t._1 -> t._2.toByte)
         .toMap
-        
-      val sparseData = data.zipWithIndex().flatMap ({ case (lp, r) => 
+
+      val sparseData = data.zipWithIndex().flatMap({
+        case (lp, r) =>
           requireByteValues(lp.features)
           val sv = lp.features.asInstanceOf[SparseVector]
           val output = (nFeatures - 1) -> (r, classMap(lp.label))
-          val inputs = for(i <- 0 until sv.indices.length) 
+          val inputs = for (i <- 0 until sv.indices.length)
             yield (sv.indices(i), (r, sv.values(i).toByte))
-          output +: inputs           
+          output +: inputs
       })
-      
+
       // Transform sparse data into a columnar format 
       // by grouping all values for the same feature in a single vector
       val columnarData = sparseData.groupByKey(new HashPartitioner(np))
-        .mapValues({a => 
-          if(a.size >= nInstances) {
+        .mapValues({ a =>
+          if (a.size >= nInstances) {
             val init = Array.fill[Byte](nInstances.toInt)(0)
             val result: BV[Byte] = new BDV(init)
-            a.foreach({case (k, v) => result(k.toInt) = v})
+            a.foreach({ case (k, v) => result(k.toInt) = v })
             result
           } else {
             val init = a.toArray.sortBy(_._1)
             new BSV(init.map(_._1.toInt), init.map(_._2), nInstances.toInt)
           }
         }).persist(StorageLevel.MEMORY_ONLY)
-      
+
       ColumnarData(null, columnarData, false, data.partitions.size)
     }
-    
+
     // Start the main algorithm
-    val selected = selectFeatures(colData, nInstances, nFeatures)          
-    if(dense) colData.dense.unpersist() else colData.sparse.unpersist()
-  
+    val selected = selectFeatures(colData, nInstances, nFeatures)
+    if (dense) colData.dense.unpersist() else colData.sparse.unpersist()
+
     // Print best features according to the mRMR measure
-    val out = selected.map{case F(feat, rel) => 
+    val out = selected.map {
+      case F(feat, rel) =>
         (feat + 1) + "\t" + "%.4f".format(rel)
-      }.mkString("\n")
+    }.mkString("\n")
     logInfo("\n*** Selected features ***\nFeature\tScore\n" + out)
     // Features must be sorted
-    new InfoThSelectorModel(selected.map{case F(feat, rel) => feat}.sorted.toArray)
+    new InfoThSelectorModel(selected.map { case F(feat, rel) => feat }.sorted.toArray)
   }
 }
 
 class ExactPartitioner(
-    partitions: Int,
-    elements: Long)
-  extends Partitioner {
+  partitions: Int,
+  elements: Long
+)
+    extends Partitioner {
 
   override def numPartitions: Int = partitions
-  
+
   override def getPartition(key: Any): Int = {
     val k = key.asInstanceOf[Long]
     return (k * partitions / elements).toInt
