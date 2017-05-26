@@ -25,7 +25,7 @@ import org.json4s.jackson.JsonMethods._
 import breeze.linalg.{DenseVector => BDV, SparseVector => BSV, Vector => BV, DenseMatrix => BDM}
 import org.apache.spark.annotation.Since
 import org.apache.spark.annotation.Experimental
-import org.apache.spark.Logging
+import org.apache.spark.internal.Logging
 import org.apache.spark.mllib.feature.{InfoThCriterionFactory => FT}
 import org.apache.spark.mllib.feature.{InfoTheory => IT}
 import org.apache.spark.mllib.regression.LabeledPoint
@@ -172,7 +172,7 @@ object InfoThSelectorModel extends Loader[InfoThSelectorModel] {
       // Check schema explicitly since erasure makes it hard to use match-case for checking.
       Loader.checkSchema[Data](dataFrame.schema)
 
-      val features = dataArray.map {
+      val features = dataArray.rdd.map {
         case Row(feature: Int) => (feature)
       }.collect()
 

@@ -19,18 +19,22 @@ package org.apache.spark.ml.feature
 
 import org.apache.hadoop.fs.Path
 import org.apache.spark.annotation.{Experimental, Since}
-import org.apache.spark.ml._
 import org.apache.spark.ml.attribute.{AttributeGroup, _}
 import org.apache.spark.ml.param._
 import org.apache.spark.ml.param.shared._
 import org.apache.spark.ml.util._
 import org.apache.spark.mllib.feature
-import org.apache.spark.mllib.linalg.{Vector, VectorUDT}
-import org.apache.spark.mllib.regression.LabeledPoint
+import org.apache.spark.rdd.RDD
+import org.apache.spark.mllib.regression.{LabeledPoint => OldLabeledPoint}
+import org.apache.spark.mllib.linalg.{Vectors => OldVectors}
+import org.apache.spark.ml.linalg.{Vector, VectorUDT}
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{DoubleType, StructField, StructType}
 import org.apache.spark.mllib.feature.InfoThCriterionFactory
+import org.apache.spark.ml.Model
+import org.apache.spark.ml.Estimator
+
 
 /**
  * Params for [[InfoThSelector]] and [[InfoThSelectorModel]].
@@ -116,13 +120,15 @@ final class InfoThSelector(override val uid: String)
   /** @group setParam */
   def setLabelCol(value: String): this.type = set(labelCol, value)
 
-  override def fit(dataset: DataFrame): InfoThSelectorModel = {
+  @Since("2.1.0")
+  override def fit(dataset: Dataset[_]): InfoThSelectorModel = {
     transformSchema(dataset.schema, logging = true)
-    val input = dataset.select($(labelCol), $(featuresCol)).map {
-      case Row(label: Double, features: Vector) =>
-        LabeledPoint(label, features)
+    val input: RDD[OldLabeledPoint] =
+      dataset.select(col($(labelCol)).cast(DoubleType), col($(featuresCol))).rdd.map {
+        case Row(label: Double, features: Vector) =>
+          OldLabeledPoint(label, OldVectors.fromML(features))
     }
-
+    
     val InfoThSelector = new feature.InfoThSelector(
         new InfoThCriterionFactory($(selectCriterion)),
         $(numTopFeatures),
@@ -130,10 +136,10 @@ final class InfoThSelector(override val uid: String)
     copyValues(new InfoThSelectorModel(uid, InfoThSelector).setParent(this))
   }
 
+  @Since("2.1.0")
   override def transformSchema(schema: StructType): StructType = {
-    validateParams()
     SchemaUtils.checkColumnType(schema, $(featuresCol), new VectorUDT)
-    SchemaUtils.checkColumnType(schema, $(labelCol), DoubleType)
+    SchemaUtils.checkNumericType(schema, $(labelCol))
     SchemaUtils.appendColumn(schema, $(outputCol), new VectorUDT)
   }
 
@@ -148,10 +154,9 @@ object InfoThSelector extends DefaultParamsReadable[InfoThSelector] {
 }
 
 /**
- * :: Experimental ::
  * Model fitted by [[InfoThSelector]].
  */
-@Experimental
+@Since("1.6.0")
 final class InfoThSelectorModel private[ml] (
     override val uid: String,
     private val InfoThSelector: feature.InfoThSelectorModel)
@@ -171,15 +176,15 @@ final class InfoThSelectorModel private[ml] (
   /** @group setParam */
   def setLabelCol(value: String): this.type = set(labelCol, value)
 
-  override def transform(dataset: DataFrame): DataFrame = {
+  override def transform(dataset: Dataset[_]): DataFrame = {
     val transformedSchema = transformSchema(dataset.schema, logging = true)
     val newField = transformedSchema.last
-    val selector = udf { InfoThSelector.transform _ }
+    val selector = udf ( (mlVector: Vector) => 
+      InfoThSelector.transform(OldVectors.fromML(mlVector)).asML )
     dataset.withColumn($(outputCol), selector(col($(featuresCol))), newField.metadata)
   }
 
   override def transformSchema(schema: StructType): StructType = {
-    validateParams()
     SchemaUtils.checkColumnType(schema, $(featuresCol), new VectorUDT)
     val newField = prepOutputField(schema)
     val outputFields = schema.fields :+ newField
