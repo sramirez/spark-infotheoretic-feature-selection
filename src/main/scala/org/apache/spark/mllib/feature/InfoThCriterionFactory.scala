@@ -18,46 +18,47 @@
 package org.apache.spark.mllib.feature
 
 /**
- * Factory class that generates a wide range of info-theory criterions [1] to 
+ * Factory class that generates a wide range of info-theory criterions [1] to
  * perform a feature selection phase on data.
- * 
- * [1] Brown, G., Pocock, A., Zhao, M. J., & Lujn, M. (2012). 
- * "Conditional likelihood maximization: a unifying framework 
- * for information theoretic feature selection." 
+ *
+ * [1] Brown, G., Pocock, A., Zhao, M. J., & Lujn, M. (2012).
+ * "Conditional likelihood maximization: a unifying framework
+ * for information theoretic feature selection."
  * The Journal of Machine Learning Research, 13(1), 27-66.
- * 
- * @param criterion String that specifies the criterion to be used 
+ *
+ * @param criterion String that specifies the criterion to be used
  * (options: JMI, mRMR, ICAP, CMIM and IF).
  * @return An initialized info-theory criterion.
- * 
+ *
  */
 
 class InfoThCriterionFactory(
-    val criterion: String, 
-    val beta: Float = 0.0f, 
-    val alpha: Float = 0.0f) extends Serializable {
+    val criterion: String,
+    val beta: Float = 0.0f,
+    val alpha: Float = 0.0f
+) extends Serializable {
 
   val MIM = "mim"
   val MIFS = "mifs"
-  val JMI  = "jmi"
+  val JMI = "jmi"
   val MRMR = "mrmr"
   val ICAP = "icap"
   val CMIM = "cmim"
-  val IF   = "if"
+  val IF = "if"
 
-  /** 
+  /**
    *  Generates a specific info-theory criterion
    */
   def getCriterion: InfoThCriterion = {
     criterion match {
       case MIM => new Mim
       case MIFS => new Mifs(beta)
-      case JMI  => new Jmi
+      case JMI => new Jmi
       case MRMR => new Mrmr
       case ICAP => new Icap
       case CMIM => new Cmim
-      case IF   => new If
-      case _    => throw new IllegalArgumentException("criterion unknown")
+      case IF => new If
+      case _ => throw new IllegalArgumentException("criterion unknown")
     }
   }
 }

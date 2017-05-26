@@ -23,7 +23,7 @@ package org.apache.spark.mllib.feature
 trait InfoThCriterion extends Serializable with Ordered[InfoThCriterion] {
 
   var relevance: Float = 0.0f
-  var valid: Boolean = true 
+  var valid: Boolean = true
 
   /**
    * Protected method to set the relevance.
@@ -33,7 +33,7 @@ trait InfoThCriterion extends Serializable with Ordered[InfoThCriterion] {
     this.relevance = relevance
     this
   }
-  
+
   /**
    * Method to set the validity.
    * The default value is true.
@@ -43,24 +43,24 @@ trait InfoThCriterion extends Serializable with Ordered[InfoThCriterion] {
     this
   }
 
-  /** 
+  /**
    *  Compares the score of two criterions
    */
   override def compare(that: InfoThCriterion) = {
     this.score.compare(that.score)
   }
 
-  /** 
+  /**
    * Initialize a criterion with a given relevance value
    */
   def init(relevance: Float): InfoThCriterion
 
   /**
-   * 
+   *
    * Updates the criterion score with new mutual information and conditional mutual information.
    * @param mi Mutual information between the criterion and another variable.
    * @param cmi Conditional mutual information between the criterion and another variable.
-   * 
+   *
    */
   def update(mi: Float, cmi: Float): InfoThCriterion
 
@@ -70,18 +70,17 @@ trait InfoThCriterion extends Serializable with Ordered[InfoThCriterion] {
   def score: Float
 }
 
-
 /**
  * Mutual Information Maximisation (MIM)
  */
 class Mim extends InfoThCriterion {
 
   override def score = relevance
-  
+
   override def init(relevance: Float): InfoThCriterion = {
     this.setRelevance(relevance)
   }
-  
+
   override def update(mi: Float = 0.0f, cmi: Float = 0.0f): InfoThCriterion = this
   override def toString: String = "MIM"
 }
@@ -89,24 +88,23 @@ class Mim extends InfoThCriterion {
 /**
  * Mutual Information FS (MIFS)
  */
-class Mifs (val beta: Float = 0.0f) extends InfoThCriterion {
+class Mifs(val beta: Float = 0.0f) extends InfoThCriterion {
 
   var redundance: Float = 0.0f
 
   override def score = relevance - redundance * beta
-  
+
   override def init(relevance: Float): InfoThCriterion = {
     this.setRelevance(relevance)
   }
-  
+
   override def update(mi: Float, cmi: Float = 0.0f): InfoThCriterion = {
     redundance += mi
     this
   }
-  
+
   override def toString: String = "MIFS"
 }
-
 
 /**
  * Joint Mutual Information criterion (JMI)
@@ -135,7 +133,6 @@ class Jmi extends InfoThCriterion {
   }
   override def toString: String = "JMI"
 }
-
 
 /**
  * Minimum-Redundancy Maximum-Relevance criterion (mRMR)
@@ -184,14 +181,12 @@ class Cmim extends InfoThCriterion {
 
 }
 
-
 /**
  * Informative Fragments (IF)
  */
 class If extends Cmim {
   override def toString: String = "IF"
 }
-
 
 /**
  * Interaction Capping (ICAP)
