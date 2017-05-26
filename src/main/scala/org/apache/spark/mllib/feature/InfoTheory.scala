@@ -107,9 +107,9 @@ class InfoTheory extends Serializable {
       // Aggregate values by row (X)
       val aggX = m.map(h1 => sum(h1(*, ::)).toDenseVector)
       // Use the previous variable to sum up and so obtaining X accumulators 
-      val xProb = aggX.reduce(_ + _).apply(0).map(_.toFloat / n)
+      val xProb = aggX.reduce(_ + _).map(_.toFloat / n)
       // Aggregate all matrices in Z to obtain the joint probabilities for X and Y
-      val xyProb = m.reduce(_ + _).apply(0).map(_.toFloat / n)
+      val xyProb = m.reduce(_ + _).map(_.toFloat / n)
       val xzProb = aggX.map(_.map(_.toFloat / n))
 
       for (z <- 0 until m.length) {
