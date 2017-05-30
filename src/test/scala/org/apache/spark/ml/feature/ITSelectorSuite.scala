@@ -8,9 +8,9 @@ import TestHelper._
 
 
 /**
-  * Test MDLP discretization
+  * Test infomartion theoretic feature selection
   *
-  * @author Barry Becker
+  * @author Sergio Ramirez
   */
 @RunWith(classOf[JUnitRunner])
 class MDLPDiscretizerSuite extends FunSuite with BeforeAndAfterAll {
@@ -22,10 +22,11 @@ class MDLPDiscretizerSuite extends FunSuite with BeforeAndAfterAll {
   }
 
   /** Do entropy based binning of cars data from UC Irvine repository. */
-  test("Run MDLPD on single mpg column in cars data (maxBins = 10)") {
+  test("Run ITFS on colon data (nPart = 20, nfeat = 20)") {
 
     val df = readColonData(sqlContext)
-    val model = getSelectorModel(df, Array("mpg"), "origin", 10)
+    val cols = df.columns
+    val model = getSelectorModel(df, df.columns.drop(1), df.columns.head, 10, 20)
 
     assertResult("764, 1581, 1671, 512, 1670, 1324, 1381, 1971, 1422, 1411") {
       model.selectedFeatures.mkString(", ")

@@ -137,7 +137,7 @@ final class InfoThSelector @Since("1.6.0") (@Since("1.6.0") override val uid: St
       dataset.select(col($(labelCol)).cast(DoubleType), col($(featuresCol))).rdd.map {
         case Row(label: Double, features: Vector) =>
           OldLabeledPoint(label, OldVectors.fromML(features))
-      }
+      }.cache()
 
     val InfoThSelector = new feature.InfoThSelector(
       new InfoThCriterionFactory($(selectCriterion)),

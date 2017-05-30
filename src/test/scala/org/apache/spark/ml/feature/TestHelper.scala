@@ -1,13 +1,14 @@
 package org.apache.spark.ml.feature
 
 import java.sql.Timestamp
-
 import org.apache.log4j.{Level, LogManager}
 import org.apache.spark.sql.functions._
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.types._
 import org.joda.time.format.DateTimeFormat
+import org.apache.spark.ml.linalg.Vectors
+import org.apache.spark.ml.linalg.VectorUDT
 
 /**
   * Loads various test datasets
@@ -30,18 +31,24 @@ object TestHelper {
   def createSelectorModel(dataframe: DataFrame, inputCols: Array[String],
                              labelColumn: String,
                              nPartitions: Int = 100,
-                             numTopFeatures: Int = 20): InfoThSelectorModel = {
+                             numTopFeatures: Int = 20, 
+                             allVectorsDense: Boolean = true): InfoThSelectorModel = {
     val featureAssembler = new VectorAssembler()
       .setInputCols(inputCols)
       .setOutputCol("features")
     val processedDf = featureAssembler.transform(dataframe)
     
+    
+     processedDf.map {
+        case Row(label: Double, features: Vector) =>
+          OldLabeledPoint(label, OldVectors.fromML(features))
+      }
     val selector = new InfoThSelector()
         .setSelectCriterion("mrmr")
         .setNPartitions(nPartitions)
         .setNumTopFeatures(numTopFeatures)
-        .setFeaturesCol("features")
-        .setLabelCol("class")
+        .setFeaturesCol("features")// this must be a feature vector
+        .setLabelCol(labelColumn + INDEX_SUFFIX)
         .setOutputCol("selectedFeatures")
 
     selector.fit(processedDf)
@@ -97,23 +104,49 @@ object TestHelper {
   
   /** @return standard iris dataset from UCI repo.
     */
-  def readIrisData(sqlContext: SQLContext): DataFrame = {
+  /*def readColonData(sqlContext: SQLContext): DataFrame = {
     val data = SPARK_CTX.textFile(FILE_PREFIX + "iris.data")
     val nullable = true
-
-    val schema = StructType(List(
-      StructField("sepallength", DoubleType, nullable),
-      StructField("sepalwidth", DoubleType, nullable),
-      StructField("petallength", DoubleType, nullable),
-      StructField("petalwidth", DoubleType, nullable),
-      StructField("iristype", StringType, nullable)
-    ))
+    
+    val schema = (0 until 9712).map(i => StructField("var" + i, DoubleType, nullable)).toList :+ 
+      StructField("colontype", StringType, nullable)
     // ints and dates must be read as doubles
     val rows = data.map(line => line.split(",").map(elem => elem.trim))
       .map(x => {Row.fromSeq(Seq(asDouble(x(0)), asDouble(x(1)), asDouble(x(2)), asDouble(x(3)), asString(x(4))))})
 
     sqlContext.createDataFrame(rows, schema)
   }
+  
+    /** @return standard iris dataset from UCI repo.
+    */
+  def readColonData2(sqlContext: SQLContext): DataFrame = {
+     val data = SPARK_CTX.textFile(FILE_PREFIX + "iris.data")
+     val nullable = true
+   val schema = StructType(List(
+      StructField("features", new VectorUDT, nullable),
+      StructField("class", DoubleType, nullable)
+    ))
+    val rows = data.map{line => 
+      val split = line.split(",").map(elem => elem.trim)
+      val features = Vectors.dense(split.drop(1).map(_.toDouble))
+      val label = split.head.toDouble
+      (features, label)
+    }
+    val asd = sqlContext.createDataFrame(rows, schema)
+   
+  }*/
+
+  
+  def readColonData(sqlContext: SQLContext): DataFrame = {
+       val df = sqlContext.read
+        .format("com.databricks.spark.csv")
+        .option("header", "true") // Use first line of all files as header
+        .option("inferSchema", "true") // Automatically infer data types
+        .load(FILE_PREFIX + "test_colon_s3.csv")
+       df
+  }
+
+  
 
 
   /** @return dataset with 3 double columns. The first is the label column and contain null.
