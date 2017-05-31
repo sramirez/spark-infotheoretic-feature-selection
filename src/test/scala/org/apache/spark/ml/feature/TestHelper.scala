@@ -8,7 +8,10 @@ import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.types._
 import org.joda.time.format.DateTimeFormat
 import org.apache.spark.ml.linalg.Vectors
+import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.ml.linalg.VectorUDT
+import org.apache.spark.sql.Dataset
+import org.apache.spark.ml.util._
 
 /**
   * Loads various test datasets
@@ -28,7 +31,8 @@ object TestHelper {
   /**
     * @return the discretizer fit to the data given the specified features to bin and label use as target.
     */
-  def createSelectorModel(dataframe: DataFrame, inputCols: Array[String],
+  
+  def createSelectorModel(sqlContext: SQLContext, dataframe: Dataset[_], inputCols: Array[String],
                              labelColumn: String,
                              nPartitions: Int = 100,
                              numTopFeatures: Int = 20, 
@@ -36,13 +40,17 @@ object TestHelper {
     val featureAssembler = new VectorAssembler()
       .setInputCols(inputCols)
       .setOutputCol("features")
-    val processedDf = featureAssembler.transform(dataframe)
+    val processedDf = featureAssembler.transform(dataframe).select(labelColumn + INDEX_SUFFIX, "features")
     
-    
-     processedDf.map {
+    /** InfoSelector requires all vectors from the same type (either be sparse or dense) **/
+    val rddData = processedDf.rdd.map {
         case Row(label: Double, features: Vector) =>
-          OldLabeledPoint(label, OldVectors.fromML(features))
+          val standardv = if(allVectorsDense) features.toDense else features.toSparse
+          Row.fromSeq(Seq(label, standardv))
       }
+    
+    val inputData = sqlContext.createDataFrame(rddData, processedDf.schema)
+      
     val selector = new InfoThSelector()
         .setSelectCriterion("mrmr")
         .setNPartitions(nPartitions)
@@ -51,7 +59,7 @@ object TestHelper {
         .setLabelCol(labelColumn + INDEX_SUFFIX)
         .setOutputCol("selectedFeatures")
 
-    selector.fit(processedDf)
+    selector.fit(inputData)
   }
 
 
@@ -59,12 +67,12 @@ object TestHelper {
     * The label column will have null values replaced with MISSING values in this case.
     * @return the discretizer fit to the data given the specified features to bin and label use as target.
     */
-  def getSelectorModel(dataframe: DataFrame, inputCols: Array[String],
+  def getSelectorModel(sqlContext: SQLContext, dataframe: DataFrame, inputCols: Array[String],
                           labelColumn: String,
                              nPartitions: Int = 100,
                              numTopFeatures: Int = 20): InfoThSelectorModel = {
     val processedDf = cleanLabelCol(dataframe, labelColumn)
-    createSelectorModel(processedDf, inputCols, labelColumn, nPartitions, numTopFeatures)
+    createSelectorModel(sqlContext, processedDf, inputCols, labelColumn, nPartitions, numTopFeatures)
   }
 
 

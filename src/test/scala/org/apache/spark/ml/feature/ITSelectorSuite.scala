@@ -26,7 +26,7 @@ class MDLPDiscretizerSuite extends FunSuite with BeforeAndAfterAll {
 
     val df = readColonData(sqlContext)
     val cols = df.columns
-    val model = getSelectorModel(df, df.columns.drop(1), df.columns.head, 10, 20)
+    val model = getSelectorModel(sqlContext, df, df.columns.drop(1), df.columns.head, 10, 20)
 
     assertResult("764, 1581, 1671, 512, 1670, 1324, 1381, 1971, 1422, 1411") {
       model.selectedFeatures.mkString(", ")
