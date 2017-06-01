@@ -29,7 +29,7 @@ object TestHelper {
   final val INDEX_SUFFIX: String = "_IDX"
 
   /**
-    * @return the discretizer fit to the data given the specified features to bin and label use as target.
+    * @return the feature select fit to the data given the specified features to bin and label use as target.
     */
   
   def createSelectorModel(sqlContext: SQLContext, dataframe: Dataset[_], inputCols: Array[String],
@@ -37,7 +37,7 @@ object TestHelper {
                              nPartitions: Int = 100,
                              numTopFeatures: Int = 20, 
                              allVectorsDense: Boolean = true,
-                             padded: Int = 0): InfoThSelectorModel = {
+                             padded: Int = 0 /* if minimum value is negative */): InfoThSelectorModel = {
     val featureAssembler = new VectorAssembler()
       .setInputCols(inputCols)
       .setOutputCol("features")
@@ -73,7 +73,7 @@ object TestHelper {
 
   /**
     * The label column will have null values replaced with MISSING values in this case.
-    * @return the discretizer fit to the data given the specified features to bin and label use as target.
+    * @return the feature selector fit to the data given the specified features to bin and label use as target.
     */
   def getSelectorModel(sqlContext: SQLContext, dataframe: DataFrame, inputCols: Array[String],
                           labelColumn: String,
@@ -121,53 +121,17 @@ object TestHelper {
     sc
   }
   
-  /** @return standard iris dataset from UCI repo.
+  /** @return standard csv data from the repo.
     */
-  /*def readColonData(sqlContext: SQLContext): DataFrame = {
-    val data = SPARK_CTX.textFile(FILE_PREFIX + "iris.data")
-    val nullable = true
-    
-    val schema = (0 until 9712).map(i => StructField("var" + i, DoubleType, nullable)).toList :+ 
-      StructField("colontype", StringType, nullable)
-    // ints and dates must be read as doubles
-    val rows = data.map(line => line.split(",").map(elem => elem.trim))
-      .map(x => {Row.fromSeq(Seq(asDouble(x(0)), asDouble(x(1)), asDouble(x(2)), asDouble(x(3)), asString(x(4))))})
-
-    sqlContext.createDataFrame(rows, schema)
-  }
-  
-    /** @return standard iris dataset from UCI repo.
-    */
-  def readColonData2(sqlContext: SQLContext): DataFrame = {
-     val data = SPARK_CTX.textFile(FILE_PREFIX + "iris.data")
-     val nullable = true
-   val schema = StructType(List(
-      StructField("features", new VectorUDT, nullable),
-      StructField("class", DoubleType, nullable)
-    ))
-    val rows = data.map{line => 
-      val split = line.split(",").map(elem => elem.trim)
-      val features = Vectors.dense(split.drop(1).map(_.toDouble))
-      val label = split.head.toDouble
-      (features, label)
-    }
-    val asd = sqlContext.createDataFrame(rows, schema)
-   
-  }*/
-
-  
-  def readColonData(sqlContext: SQLContext): DataFrame = {
+  def readCSVData(sqlContext: SQLContext, file: String): DataFrame = {
        val df = sqlContext.read
         .format("com.databricks.spark.csv")
         .option("header", "true") // Use first line of all files as header
         .option("inferSchema", "true") // Automatically infer data types
-        .load(FILE_PREFIX + "test_colon_s3.csv")
+        .load(FILE_PREFIX + file)
        df
   }
-
   
-
-
   /** @return dataset with 3 double columns. The first is the label column and contain null.
     */
   def readNullLabelTestData(sqlContext: SQLContext): DataFrame = {
