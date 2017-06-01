@@ -316,8 +316,7 @@ class InfoThSelector @Since("1.6.0") (
         case dv: DenseVector =>
           dv.values
       }
-      val condition = (value: Double) => value <= Byte.MaxValue &&
-        value >= Byte.MinValue && value % 1 == 0.0
+      val condition = (value: Double) => value <= 255 && value >= 0.0 && value % 1 == 0.0
       if (!values.forall(condition(_))) {
         val str = values.mkString(",")
         throw new SparkException(
@@ -412,7 +411,7 @@ class InfoThSelector @Since("1.6.0") (
       case F(feat, rel) =>
         (feat + 1) + "\t" + "%.4f".format(rel)
     }.mkString("\n")
-    logInfo("\n*** Selected features ***\nFeature\tScore\n" + out)
+    println("\n*** Selected features ***\nFeature\tScore\n" + out)
     // Features must be sorted
     new InfoThSelectorModel(selected.map { case F(feat, rel) => feat }.sorted.toArray)
   }

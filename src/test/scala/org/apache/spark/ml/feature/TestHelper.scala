@@ -36,7 +36,8 @@ object TestHelper {
                              labelColumn: String,
                              nPartitions: Int = 100,
                              numTopFeatures: Int = 20, 
-                             allVectorsDense: Boolean = true): InfoThSelectorModel = {
+                             allVectorsDense: Boolean = true,
+                             padded: Int = 0): InfoThSelectorModel = {
     val featureAssembler = new VectorAssembler()
       .setInputCols(inputCols)
       .setOutputCol("features")
@@ -45,7 +46,14 @@ object TestHelper {
     /** InfoSelector requires all vectors from the same type (either be sparse or dense) **/
     val rddData = processedDf.rdd.map {
         case Row(label: Double, features: Vector) =>
-          val standardv = if(allVectorsDense) features.toDense else features.toSparse
+          val standardv = if(allVectorsDense){
+            Vectors.dense(features.toArray.map(_ + padded))
+          } else {
+              val sparseVec = features.toSparse
+              val newValues: Array[Double] = sparseVec.values.map(_ + padded)
+              Vectors.sparse(sparseVec.size, sparseVec.indices, newValues)
+          }
+          
           Row.fromSeq(Seq(label, standardv))
       }
     
@@ -70,9 +78,12 @@ object TestHelper {
   def getSelectorModel(sqlContext: SQLContext, dataframe: DataFrame, inputCols: Array[String],
                           labelColumn: String,
                              nPartitions: Int = 100,
-                             numTopFeatures: Int = 20): InfoThSelectorModel = {
+                             numTopFeatures: Int = 20,
+                             allVectorsDense: Boolean = true,
+                             padded: Int = 0): InfoThSelectorModel = {
     val processedDf = cleanLabelCol(dataframe, labelColumn)
-    createSelectorModel(sqlContext, processedDf, inputCols, labelColumn, nPartitions, numTopFeatures)
+    createSelectorModel(sqlContext, processedDf, inputCols, labelColumn, 
+        nPartitions, numTopFeatures, allVectorsDense, padded)
   }
 
 

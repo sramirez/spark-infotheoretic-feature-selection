@@ -13,7 +13,7 @@ import TestHelper._
   * @author Sergio Ramirez
   */
 @RunWith(classOf[JUnitRunner])
-class MDLPDiscretizerSuite extends FunSuite with BeforeAndAfterAll {
+class ITSelectorSuite extends FunSuite with BeforeAndAfterAll {
 
   var sqlContext: SQLContext = null
 
@@ -22,13 +22,15 @@ class MDLPDiscretizerSuite extends FunSuite with BeforeAndAfterAll {
   }
 
   /** Do entropy based binning of cars data from UC Irvine repository. */
-  test("Run ITFS on colon data (nPart = 20, nfeat = 20)") {
+  test("Run ITFS on colon data (nPart = 10, nfeat = 10)") {
 
     val df = readColonData(sqlContext)
     val cols = df.columns
-    val model = getSelectorModel(sqlContext, df, df.columns.drop(1), df.columns.head, 10, 20)
+    val pad = 2
+    val allVectorsDense = true
+    val model = getSelectorModel(sqlContext, df, cols.drop(1), cols.head, 10, 10, allVectorsDense, pad)
 
-    assertResult("764, 1581, 1671, 512, 1670, 1324, 1381, 1971, 1422, 1411") {
+    assertResult("512, 764, 1324, 1380, 1411, 1422, 1581, 1670, 1671, 1971") {
       model.selectedFeatures.mkString(", ")
     }
   }
