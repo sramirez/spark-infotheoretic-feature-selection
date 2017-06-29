@@ -377,7 +377,8 @@ class InfoThSelector @Since("1.6.0") (
       val sparseData = data.zipWithIndex().flatMap({
         case (lp, r) =>
           requireByteValues(lp.features)
-          val sv = lp.features.asInstanceOf[SparseVector]
+          //val sv = lp.features.asInstanceOf[SparseVector]
+          val sv = lp.features.toSparse
           val output = (nFeatures - 1) -> (r, classMap(lp.label))
           val inputs = for (i <- 0 until sv.indices.length)
             yield (sv.indices(i), (r, sv.values(i).toByte))
