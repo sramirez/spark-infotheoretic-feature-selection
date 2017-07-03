@@ -348,9 +348,10 @@ class InfoThSelector @Since("1.6.0") (
         val mat = Array.ofDim[Byte](nFeatures, data.length)
         var j = 0
         for (reg <- data) {
-          requireByteValues(reg.features)
-          for (i <- 0 until reg.features.size) mat(i)(j) = reg.features(i).toByte
-          mat(reg.features.size)(j) = classMap(reg.label)
+          val dv = reg.features.toDense
+          requireByteValues(dv)
+          for (i <- 0 until dv.size) mat(i)(j) = dv(i).toByte
+          mat(dv.size)(j) = classMap(reg.label)
           j += 1
         }
 
@@ -377,7 +378,6 @@ class InfoThSelector @Since("1.6.0") (
       val sparseData = data.zipWithIndex().flatMap({
         case (lp, r) =>
           requireByteValues(lp.features)
-          //val sv = lp.features.asInstanceOf[SparseVector]
           val sv = lp.features.toSparse
           val output = (nFeatures - 1) -> (r, classMap(lp.label))
           val inputs = for (i <- 0 until sv.indices.length)
