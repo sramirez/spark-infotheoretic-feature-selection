@@ -5,6 +5,10 @@ The present framework implements Feature Selection (FS) on Spark for its applica
 
 Spark package: http://spark-packages.org/package/sramirez/spark-infotheoretic-feature-selection
 
+Please cite as: S. Ramírez-Gallego; H. Mouriño-Talín; D. Martínez-Rego; V. Bolón-Canedo; J. M. Benítez; A. Alonso-Betanzos; F. Herrera, "An Information Theory-Based Feature Selection Framework for Big Data Under Apache Spark," in IEEE Transactions on Systems, Man, and Cybernetics: Systems, in press, pp.1-13, doi: 10.1109/TSMC.2017.2670926
+URL: http://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7970198&isnumber=6376248
+
+
 ## Main features:
 
 * Version for new ml library.
@@ -57,6 +61,8 @@ By doing so, data can be transformed to byte type directly, making the selection
 - Héctor Mouriño-Talín (h.mtalin@udc.es)
 - David Martínez-Rego (dmartinez@udc.es)
 
-##References
+## References
 
 [1] Brown, G., Pocock, A., Zhao, M. J., & Luján, M. (2012). "Conditional likelihood maximisation: a unifying framework for information theoretic feature selection." The Journal of Machine Learning Research, 13(1), 27-66.
+
+
