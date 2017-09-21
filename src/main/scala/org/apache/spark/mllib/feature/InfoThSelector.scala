@@ -279,8 +279,7 @@ class InfoThSelector @Since("1.6.0") (
       }
 
       println("Target feature: " + selected.head.feat)
-      val topk = redundancies.collect().sortBy(_._2._1)
-        .slice(0, nToSelect).map{ case(feat, (mi, _)) => feat -> mi}
+      val topk = redundancies.collect().map{ case(feat, (mi, _)) => feat -> mi}.sortBy(_._2)
       redundancyMap += selected.head.feat -> topk
       println("Top Mutual Redundancy: " + topk.mkString("\n"))
 

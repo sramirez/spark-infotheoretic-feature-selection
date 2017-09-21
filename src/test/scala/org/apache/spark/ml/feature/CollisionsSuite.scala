@@ -54,6 +54,34 @@ class CollisionsSuite extends FunSuite with BeforeAndAfterAll {
     rdd
   }
   
+  def compareSolutions(df: DataFrame, allVectorsDense: Boolean, padded: Int, 
+      redundancyMatrix: breeze.linalg.DenseMatrix[Float]) {
+    
+    // Return results
+    val numTopFeatures = 10
+    val nTop = 10
+    val model = getSelectorModel(sqlContext, df, df.columns.drop(1), df.columns.head, 
+        10, numTopFeatures = numTopFeatures, allVectorsDense, padded)
+    val nf = redundancyMatrix.cols
+    val order = 1 // Note: -1 means descending
+    
+    model.selectedFeatures.foreach{sf => 
+        model.redMap.get(sf) match {
+          case Some(a) => 
+            val redInfo = a.sortBy(_._2 * order).slice(0, nTop).map(_._1).toSet
+            val redCollisions = redundancyMatrix(::,sf).toArray.zipWithIndex
+              .filter(n => n._2 != nf - 1 && n._2 != sf)
+              .sortBy(_._1 * order)
+              .slice(0, nTop)
+           println("Feature target: " + sf)
+           println("# distinct features: " + redInfo.diff(redCollisions.map(_._2).toSet).toString())
+           println("Values: " + redCollisions.mkString("\n"))
+          case None => println("That didn't work.")
+        }
+    }
+    
+  }
+  
   test("Run collision estimation on lung data (nPart = 10, nfeat = 10)") {
 
     
@@ -141,26 +169,8 @@ class CollisionsSuite extends FunSuite with BeforeAndAfterAll {
       }
         
     }
-    
-    // Return results
-    val numTopFeatures = 10
-    val model = getSelectorModel(sqlContext, df, df.columns.drop(1), df.columns.head, 
-        10, numTopFeatures = numTopFeatures, allVectorsDense, padded)
-    model.selectedFeatures.foreach{sf => 
-        model.redMap.get(sf) match {
-          case Some(a) => 
-            val redInfo = a.map(_._1).toSet
-            val redCollisions = redundancyMatrix(::,sf).toArray.zipWithIndex
-              .sortBy(_._1).filter(n => n._2 != nf - 1 && n._2 != sf)
-              .slice(0, numTopFeatures).map(_._2).toSet
-           println("Feature target: " + sf)
-           println("# distinct features: " + redInfo.diff(redCollisions).toString())
-           println("Values: " + redundancyMatrix(::,sf).toArray.zipWithIndex.filter(n => n._2 != nf - 1 && n._2 != sf)
-              .sortBy(_._1).slice(0, numTopFeatures).mkString("\n"))
-          case None => println("That didn't work.")
-        }
-    }
-    
+    compareSolutions(df, allVectorsDense, padded, redundancyMatrix)
+
   } 
   
   /** Do mRMR feature selection on lung data. */
