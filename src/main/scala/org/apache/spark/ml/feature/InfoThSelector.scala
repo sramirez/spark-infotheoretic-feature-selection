@@ -18,7 +18,6 @@
 package org.apache.spark.ml.feature
 
 import org.apache.hadoop.fs.Path
-
 import org.apache.spark.annotation.{ Since, Experimental }
 import org.apache.spark.ml._
 import org.apache.spark.ml.attribute.{ AttributeGroup, _ }
@@ -33,8 +32,8 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{ DoubleType, StructField, StructType }
-
 import org.apache.spark.mllib.feature.InfoThCriterionFactory
+import scala.collection.mutable.HashMap
 
 /**
  * Params for [[InfoThSelector]] and [[InfoThSelectorModel]].
@@ -178,6 +177,8 @@ final class InfoThSelectorModel private[ml] (
 
   /** list of indices to select (filter). Must be ordered asc */
   val selectedFeatures: Array[Int] = InfoThSelector.selectedFeatures
+  
+  val redMap: HashMap[Int, Array[(Int, Float)]] = InfoThSelector.redMap
 
   /** @group setParam */
   def setFeaturesCol(value: String): this.type = set(featuresCol, value)

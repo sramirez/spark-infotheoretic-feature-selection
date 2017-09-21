@@ -18,11 +18,9 @@
 package org.apache.spark.mllib.feature
 
 import scala.collection.mutable.ArrayBuilder
-
 import org.json4s._
 import org.json4s.JsonDSL._
 import org.json4s.jackson.JsonMethods._
-
 import breeze.linalg.{ DenseVector => BDV, SparseVector => BSV, Vector => BV, DenseMatrix => BDM }
 import org.apache.spark.annotation.{ Since, Experimental }
 import org.apache.spark.mllib.feature.{ InfoThCriterionFactory => FT }
@@ -40,6 +38,7 @@ import org.apache.spark.SparkException
 import org.apache.spark.sql.{ Row, SparkSession }
 import org.apache.spark.Partitioner
 import org.apache.spark.internal.Logging
+import scala.collection.mutable.HashMap
 
 /**
  * Information Theoretic Selector model.
@@ -48,7 +47,8 @@ import org.apache.spark.internal.Logging
  */
 @Since("1.6.0")
 class InfoThSelectorModel @Since("1.6.0") (
-    @Since("1.6.0") val selectedFeatures: Array[Int]
+    @Since("1.6.0") val selectedFeatures: Array[Int],
+    @Since("1.6.0") val redMap: HashMap[Int, Array[(Int, Float)]] = HashMap[Int, Array[(Int, Float)]]()
 ) extends VectorTransformer with Saveable {
 
   require(isSorted(selectedFeatures), "Array has to be sorted asc")
@@ -214,6 +214,8 @@ class InfoThSelector @Since("1.6.0") (
     isDense: Boolean,
     originalNPart: Int
   )
+  
+  var redundancyMap = new HashMap[Int, Array[(Int, Float)]]()
 
   /**
    * Performs a info-theory FS process.
@@ -276,9 +278,16 @@ class InfoThSelector @Since("1.6.0") (
         case sit: InfoTheorySparse => sit.getRedundancies(selected.head.feat)
       }
 
-      // Update criteria with the new redundancy values
+      println("Target feature: " + selected.head.feat)
+      val topk = redundancies.collect().sortBy(_._2._1)
+        .slice(0, nToSelect).map{ case(feat, (mi, _)) => feat -> mi}
+      redundancyMap += selected.head.feat -> topk
+      println("Top Mutual Redundancy: " + topk.mkString("\n"))
+
+      // Update criteria with the new redundancy values      
       redundancies.collect().par.foreach({
         case (k, (mi, cmi)) =>
+                   
           pool(k).update(mi.toFloat, cmi.toFloat)
       })
 
@@ -413,7 +422,7 @@ class InfoThSelector @Since("1.6.0") (
     }.mkString("\n")
     println("\n*** Selected features ***\nFeature\tScore\n" + out)
     // Features must be sorted
-    new InfoThSelectorModel(selected.map { case F(feat, rel) => feat }.sorted.toArray)
+    new InfoThSelectorModel(selected.map { case F(feat, rel) => feat }.sorted.toArray, redundancyMap)
   }
 }
 
