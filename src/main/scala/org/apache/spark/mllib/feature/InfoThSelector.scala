@@ -278,10 +278,10 @@ class InfoThSelector @Since("1.6.0") (
         case sit: InfoTheorySparse => sit.getRedundancies(selected.head.feat)
       }
 
-      println("Target feature: " + selected.head.feat)
+      //println("Target feature: " + selected.head.feat)
       val topk = redundancies.collect().map{ case(feat, (mi, _)) => feat -> mi}.sortBy(_._2)
       redundancyMap += selected.head.feat -> topk
-      println("Top Mutual Redundancy: " + topk.mkString("\n"))
+      //println("Top Mutual Redundancy: " + topk.mkString("\n"))
 
       // Update criteria with the new redundancy values      
       redundancies.collect().par.foreach({

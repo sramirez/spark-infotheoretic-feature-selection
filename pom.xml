@@ -46,7 +46,20 @@
 	  <artifactId>joda-time</artifactId>
 	  <version>2.9.4</version>
 	</dependency>
-  </dependencies>
+	<dependency>
+    	<groupId>sramirez</groupId>
+    	<artifactId>spark-MDLP-discretization</artifactId>
+    	<version>1.4</version>
+  	</dependency>
+</dependencies>
+
+	<repositories>
+	  <!-- list of other repositories -->
+	  <repository>
+	    <id>SparkPackagesRepo</id>
+	    <url>http://dl.bintray.com/spark-packages/maven</url>
+	  </repository>
+	</repositories>
 
   <build>
     <sourceDirectory>src/main/scala</sourceDirectory>

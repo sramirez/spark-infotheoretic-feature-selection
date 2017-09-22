@@ -18,8 +18,8 @@ import org.apache.spark.ml.util._
   */
 object TestHelper {
 
-  final val SPARK_CTX = createSparkContext()
-  final val FILE_PREFIX = "src/test/resources/data/"
+  final val SPARK_CTX: SparkContext = null //createSparkContext()
+  final val FILE_PREFIX = ""
   final val ISO_DATE_FORMAT = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
   final val NULL_VALUE = "?"
 
@@ -27,6 +27,9 @@ object TestHelper {
   final val MISSING = "__MISSING_VALUE__"
   final val CLEAN_SUFFIX: String = "_CLEAN"
   final val INDEX_SUFFIX: String = "_IDX"
+  
+  
+  def log2(x: Float) = { math.log(x) / math.log(2) }
 
   /**
     * @return the feature select fit to the data given the specified features to bin and label use as target.

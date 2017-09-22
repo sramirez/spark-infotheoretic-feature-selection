@@ -6,15 +6,11 @@ import org.scalatest.{BeforeAndAfterAll, FunSuite}
 import org.scalatest.junit.JUnitRunner
 import TestHelper._
 import org.apache.spark.sql.Row
-import org.apache.spark.ml.linalg._
-import scala.collection.mutable.HashSet
 import scala.collection.mutable.TreeSet
-import com.github.karlhigley.spark.neighbors.KNN
-import com.github.karlhigley.spark.neighbors.ANNModel.IDPoint
-import com.github.karlhigley.spark.neighbors.util._
-
 import org.apache.spark.util.LongAccumulator
-
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.types.StructType
+import org.apache.spark.ml.linalg.{Vector, Vectors}
 
 /**
   * Test information theoretic feature selection on datasets from Peng's webpage
@@ -25,54 +21,86 @@ import org.apache.spark.util.LongAccumulator
 class CollisionsSuite extends FunSuite with BeforeAndAfterAll {
 
   var sqlContext: SQLContext = null
-  private val log2 = { x: Float => math.log(x) / math.log(2) }
 
+  val pathFile = "test_lung_s3.csv"
+  val order = 1 // Note: -1 means descending
+  val nPartitions = 1
+  val nTop = 10
+  val discretize = false
+  val padded = 2
+  val classLastIndex = false
+    
   override def beforeAll(): Unit = {
     sqlContext = new SQLContext(SPARK_CTX)
   }
   
-  
-  def initRDD(df: DataFrame, allVectorsDense: Boolean, padded: Int) = {
-    
+  def preProcess(df: DataFrame) = {
+    val other = if(classLastIndex) df.columns.dropRight(1) else df.columns.drop(1)
+    val cls = if(classLastIndex) df.columns.last else df.columns.head
     val featureAssembler = new VectorAssembler()
-      .setInputCols(df.columns.drop(1))
+      .setInputCols(other)
       .setOutputCol("features")
-    val processedDf0 = cleanLabelCol(df, df.columns.head)
-    val processedDf = featureAssembler.transform(processedDf0)
-      .select(processedDf0.columns.head + INDEX_SUFFIX, "features")
-    val rdd = processedDf.rdd.map {
+    val cleanedDF = cleanLabelCol(df, cls)
+    val clsLabel = cleanedDF.columns.head + INDEX_SUFFIX
+    var processedDf = featureAssembler.transform(cleanedDF)
+      .select(clsLabel, "features")
+      
+    if(discretize){      
+      val discretizer = new MDLPDiscretizer()
+        .setMaxBins(15)
+        .setMaxByPart(10000)
+        .setInputCol("features")
+        .setLabelCol(clsLabel)
+        .setOutputCol("disc-" + clsLabel)
+  
+      processedDf = discretizer.fit(processedDf).transform(processedDf)
+    }
+    processedDf
+  }
+   
+  def initRDD(df: DataFrame, allVectorsDense: Boolean) = {
+    val pad = padded
+    df.rdd.map {
       case Row(label: Double, features: Vector) =>
         val standardv = if(allVectorsDense){
-          Vectors.dense(features.toArray.map(_ + padded))
+          Vectors.dense(features.toArray.map(_ + pad))
         } else {
             val sparseVec = features.toSparse
-            val newValues: Array[Double] = sparseVec.values.map(_ + padded)
+            val newValues: Array[Double] = sparseVec.values.map(_ + pad)
             Vectors.sparse(sparseVec.size, sparseVec.indices, newValues)
         }        
-        LabeledPoint(label, standardv)
+        Row.fromSeq(Seq(label, standardv))
     }
-    rdd
   }
   
-  def compareSolutions(df: DataFrame, allVectorsDense: Boolean, padded: Int, 
+  def compareSolutions(rdd: RDD[Row], schema: StructType,
       redundancyMatrix: breeze.linalg.DenseMatrix[Float]) {
     
     // Return results
-    val numTopFeatures = 10
-    val nTop = 10
-    val model = getSelectorModel(sqlContext, df, df.columns.drop(1), df.columns.head, 
-        10, numTopFeatures = numTopFeatures, allVectorsDense, padded)
+    val inputData = sqlContext.createDataFrame(rdd, schema)
+    println("Columns class: " + inputData.columns.head)
+    val cls = if(classLastIndex) inputData.columns.last else inputData.columns.head
+    
+    val selector = new InfoThSelector()
+        .setSelectCriterion("mrmr")
+        .setNPartitions(nPartitions)
+        .setNumTopFeatures(nTop)
+        .setFeaturesCol("features")// this must be a feature vector
+        .setLabelCol(cls)
+        .setOutputCol("selectedFeatures")
+        
+
+    val model = selector.fit(inputData)
     val nf = redundancyMatrix.cols
-    val order = 1 // Note: -1 means descending
     
     model.selectedFeatures.foreach{sf => 
         model.redMap.get(sf) match {
           case Some(a) => 
             val redInfo = a.sortBy(_._2 * order).slice(0, nTop).map(_._1).toSet
-            val redCollisions = redundancyMatrix(::,sf).toArray.zipWithIndex
-              .filter(n => n._2 != nf - 1 && n._2 != sf)
+            val redCollisions = redundancyMatrix(::,sf).toArray.dropRight(1).zipWithIndex
+              .filter(_._2 != sf)
               .sortBy(_._1 * order)
-              .slice(0, nTop)
+              .slice(0, nTop + 1)
            println("Feature target: " + sf)
            println("# distinct features: " + redInfo.diff(redCollisions.map(_._2).toSet).toString())
            println("Values: " + redCollisions.mkString("\n"))
@@ -85,14 +113,19 @@ class CollisionsSuite extends FunSuite with BeforeAndAfterAll {
   test("Run collision estimation on lung data (nPart = 10, nfeat = 10)") {
 
     
-    val df = readCSVData(sqlContext, "test_lung_s3.csv")
-    val padded = 2
+    val rawDF = readCSVData(sqlContext, pathFile)
+    val df = preProcess(rawDF)
     val allVectorsDense = true
-    val rdd = initRDD(df, allVectorsDense, padded).zipWithUniqueId()
     
-    val elements = rdd.collect
-    val nf = elements.head._1.features.size + 1
-    val belems = rdd.context.broadcast(elements)
+    val origRDD = initRDD(df, allVectorsDense)
+    val rdd = origRDD.map {
+      case Row(label: Double, features: Vector) =>
+        LabeledPoint(label, features)
+    }.zipWithUniqueId().repartition(nPartitions).cache
+    
+    //val elements = rdd.collect
+    val nf = rdd.first._1.features.size + 1
+    //val belems = rdd.context.broadcast(elements)
     
     val accMarginal = new VectorAccumulator(nf)
     // Then, register it into spark context:
@@ -102,21 +135,26 @@ class CollisionsSuite extends FunSuite with BeforeAndAfterAll {
     val accConditional = new MatrixAccumulator(nf, nf)
     rdd.context.register(accConditional, "conditional")
     val total = rdd.context.longAccumulator("total")
-    println("# instances: " + rdd.count())
-    rdd.foreachPartition { it =>
+    println("# instances: " + rdd.count)
+    println("# partitions: " + rdd.partitions.size)
+    
+    rdd.keys.foreachPartition { it =>
         
         val marginal = breeze.linalg.DenseVector.zeros[Long](nf)
         val last = marginal.size - 1
         val joint = breeze.linalg.DenseMatrix.zeros[Long](nf, nf)
         val condjoint = breeze.linalg.DenseMatrix.zeros[Long](nf, nf)
-        val others = belems.value
-      
-        while(it.hasNext){
-          val (e1, id1) = it.next
-          
-          others.foreach{ case (e2, id2) => 
-            
-            if(id1 > id2) {
+        //val others = belems.value
+        val elements = it.toArray
+        (0 until elements.size).map{ id1 =>
+        //while(it.hasNext){
+          //val (e1, id1) = it.next
+          val e1 = elements(id1)
+          //others.foreach{ case (e2, id2) => 
+          (id1 + 1 until elements.size).map{ id2 => 
+            val e2 = elements(id2)
+            //if(id1 > id2) {
+            if(true) {
                 var set = new TreeSet[Int]()
                 val clshit = e1.label == e2.label
                 e1.features.foreachActive{ (index, value) =>
@@ -142,8 +180,7 @@ class CollisionsSuite extends FunSuite with BeforeAndAfterAll {
                   }         
                 }
               total.add(1L)
-            }
-            
+            }            
         }
       }
         
@@ -169,7 +206,7 @@ class CollisionsSuite extends FunSuite with BeforeAndAfterAll {
       }
         
     }
-    compareSolutions(df, allVectorsDense, padded, redundancyMatrix)
+    compareSolutions(origRDD, df.schema, redundancyMatrix)
 
   } 
   
@@ -357,23 +394,6 @@ class CollisionsSuite extends FunSuite with BeforeAndAfterAll {
     }
     val asd = condRedunMatrix(::,22).toArray.zipWithIndex.sortBy(-_._1).slice(0, 15)
     println("Conditional: " + asd.mkString("\n"))
-  }*/
-  
-  
-  
-    /** Do mRMR feature selection on LUNG data. */
-  /*test("Run ITFS on lung data (nPart = 10, nfeat = 10)") {
-
-    val df = readCSVData(sqlContext, "test_lung_s3.csv")
-    val cols = df.columns
-    val pad = 2
-    val allVectorsDense = true
-    val model = getSelectorModel(sqlContext, df, cols.drop(1), cols.head, 
-        10, 10, allVectorsDense, pad)
-
-    assertResult("18, 22, 29, 125, 132, 150, 166, 242, 243, 269") {
-      model.selectedFeatures.mkString(", ")
-    }
   }*/
   
 }
