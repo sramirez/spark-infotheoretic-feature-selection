@@ -46,7 +46,7 @@
 	  <artifactId>joda-time</artifactId>
 	  <version>2.9.4</version>
 	</dependency>
-	<dependency>
+		<dependency>
     	<groupId>sramirez</groupId>
     	<artifactId>spark-MDLP-discretization</artifactId>
     	<version>1.4.1</version>
