@@ -1,9 +1,6 @@
 package org.apache.spark.ml.feature
 
 import org.apache.spark.sql.{DataFrame, SQLContext}
-import org.junit.runner.RunWith
-import org.scalatest.{BeforeAndAfterAll, FunSuite}
-import org.scalatest.junit.JUnitRunner
 import org.apache.spark.sql.Row
 import scala.collection.mutable.TreeSet
 import org.apache.spark.util.LongAccumulator
