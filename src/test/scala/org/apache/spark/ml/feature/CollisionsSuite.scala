@@ -11,6 +11,7 @@ import org.apache.spark.util.LongAccumulator
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.ml.linalg.{Vector, Vectors}
+import org.apache.spark.ml.feature.TestHelper
 
 /**
   * Test information theoretic feature selection on datasets from Peng's webpage

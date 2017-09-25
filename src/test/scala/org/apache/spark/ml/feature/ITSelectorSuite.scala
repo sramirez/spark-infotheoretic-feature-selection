@@ -5,6 +5,7 @@ import org.junit.runner.RunWith
 import org.scalatest.{BeforeAndAfterAll, FunSuite}
 import org.scalatest.junit.JUnitRunner
 import TestHelper._
+import org.apache.spark.ml.feature.TestHelper
 
 
 /**

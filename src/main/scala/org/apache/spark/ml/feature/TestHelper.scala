@@ -1,6 +1,5 @@
 package org.apache.spark.ml.feature
 
-import java.sql.Timestamp
 import org.apache.log4j.{Level, LogManager}
 import org.apache.spark.sql.functions._
 import org.apache.spark.{SparkConf, SparkContext}
@@ -9,9 +8,10 @@ import org.apache.spark.sql.types._
 import org.joda.time.format.DateTimeFormat
 import org.apache.spark.ml.linalg.Vectors
 import org.apache.spark.ml.linalg.Vector
-import org.apache.spark.ml.linalg.VectorUDT
 import org.apache.spark.sql.Dataset
 import org.apache.spark.ml.util._
+import org.apache.spark.annotation.Experimental
+import org.apache.spark.annotation.Since
 
 /**
   * Loads various test datasets
