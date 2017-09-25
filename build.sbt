@@ -6,7 +6,7 @@ organization := "com.github.sramirez"
 
 scalaVersion := "2.11.8"
 
-libraryDependencies += "org.apache.spark" %% "spark-mllib" % "2.0.0"
+libraryDependencies += "org.apache.spark" %% "spark-mllib" % "2.2.0"
 
 resolvers ++= Seq(
   "Apache Staging" at "https://repository.apache.org/content/repositories/staging/",
