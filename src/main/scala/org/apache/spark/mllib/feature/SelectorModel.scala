@@ -50,7 +50,7 @@ class SelectorModel(val selectedFeatures: Array[Int]) extends VectorTransformer 
    * @return transformed vector.
    */
   override def transform(vector: Vector): Vector = {
-    FeatureUtils.compress(vector, selectedFeatures)
+    FeatureSelectionUtils.compress(vector, selectedFeatures)
   }
 
 }

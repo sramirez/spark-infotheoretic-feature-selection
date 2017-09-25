@@ -28,6 +28,8 @@ object MainMLlibTest {
   var discretize = false
   var padded = 2
   var classLastIndex = false
+  var clsLabel: String = null
+  var inputLabel: String = "features"
 
   def main(args: Array[String]) {
     
@@ -37,7 +39,7 @@ object MainMLlibTest {
     val sc = new SparkContext(conf)
     sqlContext = new SQLContext(sc)
 
-    println("Usage: MLlibTest --train-file=\"hdfs://\" --npart=1 --ntop=10 --disc=false --padded=2 --class-last=true")
+    println("Usage: MLlibTest --train-file=\"hdfs://blabla\" --npart=1 --ntop=10 --disc=false --padded=2 --class-last=true")
         
     // Create a table of parameters (parsing)
     val params = args.map({arg =>
@@ -48,29 +50,34 @@ object MainMLlibTest {
         }
     }).toMap    
     
-    pathFile = params.getOrElse("train-file", "test_lung_s3.csv")
+    pathFile = params.getOrElse("train-file", "src/test/resources/data/test_lung_s3.csv")
     nPartitions = params.getOrElse("npart", "1").toInt
     nTop = params.getOrElse("ntop", "10").toInt
-    discretize = params.getOrElse("disc", "true").toBoolean
+    discretize = params.getOrElse("disc", "false").toBoolean
     padded = params.getOrElse("padded", "2").toInt
     classLastIndex = params.getOrElse("class-last", "false").toBoolean
+    
+    println("Params used: " +  params.mkString("\n"))
     
     doComparison()
   }
   
   def doComparison() {
     val rawDF = TestHelper.readCSVData(sqlContext, pathFile)
-    val df = preProcess(rawDF)
+    val df = preProcess(rawDF).select(clsLabel, inputLabel)
     val allVectorsDense = true
     
+    println("df: " + df.first().toString())
     val origRDD = initRDD(df, allVectorsDense)
     val rdd = origRDD.map {
       case Row(label: Double, features: Vector) =>
         LabeledPoint(label, features)
-    }.zipWithUniqueId().repartition(nPartitions).cache
+    }.repartition(nPartitions).cache //zipwithUniqueIndexs
+    
+    println("rdd: " + rdd.first().toString())
     
     //val elements = rdd.collect
-    val nf = rdd.first._1.features.size + 1
+    val nf = rdd.first.features.size + 1
     //val belems = rdd.context.broadcast(elements)
     
     val accMarginal = new VectorAccumulator(nf)
@@ -84,7 +91,7 @@ object MainMLlibTest {
     println("# instances: " + rdd.count)
     println("# partitions: " + rdd.partitions.size)
     
-    rdd.keys.foreachPartition { it =>
+    rdd.foreachPartition { it =>
         
         val marginal = breeze.linalg.DenseVector.zeros[Long](nf)
         val last = marginal.size - 1
@@ -146,8 +153,7 @@ object MainMLlibTest {
     val redundancyMatrix = breeze.linalg.DenseMatrix.zeros[Float](nf, nf)
     joint.activeIterator.foreach { case((i1,i2), value) =>
       if(i1 < i2 && i1 != nf - 1 && i2 != nf - 1){
-        val red = value * log2(value / (marginal(i1) * marginal(i2))).toFloat
-        
+        val red = value * log2(value / (marginal(i1) * marginal(i2))).toFloat        
         
         redundancyMatrix(i1, i2) = red
         redundancyMatrix(i2, i1) = red        
@@ -161,22 +167,25 @@ object MainMLlibTest {
   def preProcess(df: DataFrame) = {
     val other = if(classLastIndex) df.columns.dropRight(1) else df.columns.drop(1)
     val cls = if(classLastIndex) df.columns.last else df.columns.head
+    
     val featureAssembler = new VectorAssembler()
       .setInputCols(other)
-      .setOutputCol("features")
+      .setOutputCol(inputLabel)
     val cleanedDF = TestHelper.cleanLabelCol(df, cls)
-    val clsLabel = cleanedDF.columns.head + TestHelper.INDEX_SUFFIX
+    clsLabel = cleanedDF.columns.head + TestHelper.INDEX_SUFFIX
     var processedDf = featureAssembler.transform(cleanedDF)
-      .select(clsLabel, "features")
+      .select(clsLabel, inputLabel)
       
     if(discretize){      
       val discretizer = new MDLPDiscretizer()
         .setMaxBins(15)
         .setMaxByPart(10000)
-        .setInputCol("features")
+        .setInputCol(inputLabel)
         .setLabelCol(clsLabel)
-        .setOutputCol("disc-" + clsLabel)
-  
+        .setOutputCol("disc-" + inputLabel)
+        
+      inputLabel = "disc-" + inputLabel
+      
       val model = discretizer.fit(processedDf)
       processedDf = model.transform(processedDf)
     }
@@ -202,19 +211,23 @@ object MainMLlibTest {
       redundancyMatrix: breeze.linalg.DenseMatrix[Float]) {
     
     // Return results
-    val inputData = sqlContext.createDataFrame(rdd, schema)
+    val inputData = sqlContext.createDataFrame(rdd, schema).cache()
     val cls = if(classLastIndex) inputData.columns.last else inputData.columns.head
     println("Columns class: " + cls)
+    
+    //println("inputData: " + inputData.first.toString())
+    println("schema: " + schema.toString())
     
     val selector = new InfoThSelector()
         .setSelectCriterion("mrmr")
         .setNPartitions(nPartitions)
         .setNumTopFeatures(nTop)
-        .setFeaturesCol("features")// this must be a feature vector
-        .setLabelCol(cls)
+        .setFeaturesCol(inputLabel)// this must be a feature vector
+        .setLabelCol(clsLabel)
         .setOutputCol("selectedFeatures")
         
 
+    
     val model = selector.fit(inputData)
     
     model.selectedFeatures.foreach{sf => 

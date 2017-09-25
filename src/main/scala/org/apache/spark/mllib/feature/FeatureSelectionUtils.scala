@@ -28,7 +28,7 @@ import org.apache.spark.mllib.linalg._
  */
 
 @Experimental
-object FeatureUtils {
+object FeatureSelectionUtils {
   /**
    * Returns a vector with features filtered.
    * Preserves the order of filtered features the same as their indices are stored.
