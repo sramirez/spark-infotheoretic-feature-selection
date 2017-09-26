@@ -8,7 +8,6 @@ import org.apache.spark.sql.types._
 import org.joda.time.format.DateTimeFormat
 import org.apache.spark.ml.linalg.Vectors
 import org.apache.spark.ml.linalg.Vector
-import org.apache.spark.sql.Dataset
 import org.apache.spark.ml.util._
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.annotation.Since
@@ -35,7 +34,7 @@ object TestHelper {
     * @return the feature select fit to the data given the specified features to bin and label use as target.
     */
   
-  def createSelectorModel(sqlContext: SQLContext, dataframe: Dataset[_], inputCols: Array[String],
+  def createSelectorModel(sqlContext: SQLContext, dataframe: DataFrame, inputCols: Array[String],
                              labelColumn: String,
                              nPartitions: Int = 100,
                              numTopFeatures: Int = 20, 
@@ -127,8 +126,7 @@ object TestHelper {
   /** @return standard csv data from the repo.
     */
   def readCSVData(sqlContext: SQLContext, file: String): DataFrame = {
-       val df = sqlContext.read
-        .format("com.databricks.spark.csv")
+       val df = sqlContext.read.format("csv")
         .option("header", "true") // Use first line of all files as header
         .option("inferSchema", "true") // Automatically infer data types
         .load(FILE_PREFIX + file)

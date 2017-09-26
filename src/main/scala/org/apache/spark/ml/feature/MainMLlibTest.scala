@@ -39,13 +39,13 @@ object MainMLlibTest {
     println("Usage: MLlibTest --train-file=\"hdfs://blabla\" --npart=1 --ntop=10 --disc=false --padded=2 --class-last=true")
         
     // Create a table of parameters (parsing)
-    val params = args.map({arg =>
+    val params = args.map{ arg =>
         val param = arg.split("--|=").filter(_.size > 0)
         param.size match {
-          case 2 =>  (param(0) -> param(1))
-          case _ =>  ("" -> "")
+          case 2 =>  param(0) -> param(1)
+          case _ =>  "" -> ""
         }
-    }).toMap    
+    }.toMap    
     
     pathFile = params.getOrElse("train-file", "src/test/resources/data/test_lung_s3.csv")
     nPartitions = params.getOrElse("npart", "1").toInt
