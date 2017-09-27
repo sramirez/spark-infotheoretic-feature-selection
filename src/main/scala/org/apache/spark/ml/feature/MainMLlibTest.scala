@@ -9,6 +9,8 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.SparkContext
 import org.apache.spark.ml.linalg.{Vector, Vectors}
 import org.apache.spark.SparkConf
+import org.apache.spark.sql.types.DoubleType
+import org.apache.spark.ml.Pipeline
 
 
 /**
@@ -27,16 +29,17 @@ object MainMLlibTest {
   var classLastIndex = false
   var clsLabel: String = null
   var inputLabel: String = "features"
+  var firstHeader: Boolean = false
 
   def main(args: Array[String]) {
     
     val initStartTime = System.nanoTime()
     
-    val conf = new SparkConf().setAppName("CollisionFS Test").setMaster("local[*]")
+    val conf = new SparkConf().setAppName("CollisionFS Test").setMaster("spark://ulises:7077")
     val sc = new SparkContext(conf)
     sqlContext = new SQLContext(sc)
 
-    println("Usage: MLlibTest --train-file=\"hdfs://blabla\" --npart=1 --ntop=10 --disc=false --padded=2 --class-last=true")
+    println("Usage: MLlibTest --train-file=\"hdfs://blabla\" --npart=1 --ntop=10 --disc=false --padded=2 --class-last=true --header=false")
         
     // Create a table of parameters (parsing)
     val params = args.map{ arg =>
@@ -53,6 +56,7 @@ object MainMLlibTest {
     discretize = params.getOrElse("disc", "false").toBoolean
     padded = params.getOrElse("padded", "2").toInt
     classLastIndex = params.getOrElse("class-last", "false").toBoolean
+    firstHeader = params.getOrElse("header", "false").toBoolean
     
     println("Params used: " +  params.mkString("\n"))
     
@@ -60,11 +64,12 @@ object MainMLlibTest {
   }
   
   def doComparison() {
-    val rawDF = TestHelper.readCSVData(sqlContext, pathFile)
+    val rawDF = TestHelper.readCSVData(sqlContext, pathFile, firstHeader)
     val df = preProcess(rawDF).select(clsLabel, inputLabel)
     val allVectorsDense = true
     
     println("df: " + df.first().toString())
+    
     val origRDD = initRDD(df, allVectorsDense)
     val rdd = origRDD.map {
       case Row(label: Double, features: Vector) =>
@@ -163,15 +168,39 @@ object MainMLlibTest {
   
   def preProcess(df: DataFrame) = {
     val other = if(classLastIndex) df.columns.dropRight(1) else df.columns.drop(1)
-    val cls = if(classLastIndex) df.columns.last else df.columns.head
+    clsLabel = if(classLastIndex) df.columns.last else df.columns.head
     
+    // Index categorical values
+    val stringTypes = df.dtypes.filter(_._2 == "StringType").map(_._1)
+    val tmpNames = df.dtypes.map{ case(name, typ) => if(typ == "StringType") name + "-indexed" else name}
+    clsLabel = if(classLastIndex) tmpNames.last else tmpNames.head
+    val newNames = if(classLastIndex) tmpNames.dropRight(1) else tmpNames.drop(1)
+    val indexers = stringTypes.map{ name =>
+        new StringIndexer()
+          .setInputCol(name)
+          .setOutputCol(name + "-indexed")
+    }
+
+    val pipeline = new Pipeline().setStages(indexers)
+    val typedDF = pipeline.fit(df).transform(df).drop(stringTypes: _*)
+
+    // Clean Label Column
+    val cleanedDF = TestHelper.cleanLabelCol(typedDF, clsLabel)
+    clsLabel = clsLabel + TestHelper.INDEX_SUFFIX
+    println("clslabel: " + clsLabel)
+    
+    // Assemble all input features
     val featureAssembler = new VectorAssembler()
-      .setInputCols(other)
+      .setInputCols(newNames)
       .setOutputCol(inputLabel)
-    val cleanedDF = TestHelper.cleanLabelCol(df, cls)
-    clsLabel = cleanedDF.columns.head + TestHelper.INDEX_SUFFIX
-    var processedDf = featureAssembler.transform(cleanedDF)
+
+    var processedDF = featureAssembler.transform(cleanedDF)
       .select(clsLabel, inputLabel)
+
+    println("clsLabel: " + clsLabel)
+    println("Columns: " + processedDF.columns.mkString(","))
+    println("Schema: " + processedDF.schema.toString)
+    println(processedDF.first.get(1))
       
     if(discretize){      
       val discretizer = new MDLPDiscretizer()
@@ -183,10 +212,10 @@ object MainMLlibTest {
         
       inputLabel = "disc-" + inputLabel
       
-      val model = discretizer.fit(processedDf)
-      processedDf = model.transform(processedDf)
+      val model = discretizer.fit(processedDF)
+      processedDF = model.transform(processedDF)
     }
-    processedDf
+    processedDF
   }
    
   def initRDD(df: DataFrame, allVectorsDense: Boolean) = {
@@ -229,15 +258,31 @@ object MainMLlibTest {
     
     model.selectedFeatures.foreach{sf => 
         model.redMap.get(sf) match {
-          case Some(a) => 
-            val redInfo = a.sortBy(_._2 * order).slice(0, nTop).map(_._1).toSet
+          case Some(redByFeature) => 
             val redCollisions = redundancyMatrix(::,sf).toArray.dropRight(1).zipWithIndex
               .filter(_._2 != sf)
               .sortBy(_._1 * order)
-              .slice(0, nTop)
-           println("Feature target: " + sf)
-           println("# distinct features: " + redInfo.diff(redCollisions.map(_._2).toSet).toString())
-           println("Values: " + redCollisions.mkString("\n"))
+            val rankingInfo = redByFeature.sortBy(_._2 * order).map(_._1).slice(0, nTop)
+            val rankingCollisions = redCollisions.map(_._2)
+              .zipWithIndex
+              .toMap
+              
+             // Compute average distance between rankings
+            var sum = 0.0f
+            rankingInfo.zipWithIndex.foreach{ case(f, r1) =>
+              val r2 = rankingCollisions.getOrElse(f, -1)
+              val dif = if(r2 > 0) {
+                sum += math.abs(r2 - r1)
+              }
+            }
+                       
+            println("Feature target: " + sf)            
+            println("Avg. distance by feature: " + sum / nTop)
+            println("# distinct features: " + rankingInfo.toSet.diff(
+               redCollisions.slice(0, nTop).map(_._2).toSet).toString())
+           
+            println("Values: " + redCollisions.slice(0, nTop).mkString("\n"))
+           
           case None => println("That didn't work.")
         }
     }

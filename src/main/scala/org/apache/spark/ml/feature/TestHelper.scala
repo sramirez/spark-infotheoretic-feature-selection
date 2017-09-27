@@ -115,7 +115,7 @@ object TestHelper {
 
   def createSparkContext() = {
     // the [n] corresponds to the number of worker threads and should correspond ot the number of cores available.
-    val conf = new SparkConf().setAppName("test-spark").setMaster("local[4]")
+    val conf = new SparkConf().setAppName("test-spark")//.setMaster("local[4]")
     // Changing the default parallelism gave slightly different results and did not do much for performance.
     //conf.set("spark.default.parallelism", "2")
     val sc = new SparkContext(conf)
@@ -125,9 +125,9 @@ object TestHelper {
   
   /** @return standard csv data from the repo.
     */
-  def readCSVData(sqlContext: SQLContext, file: String): DataFrame = {
+  def readCSVData(sqlContext: SQLContext, file: String, header: Boolean = true): DataFrame = {
        val df = sqlContext.read.format("csv")
-        .option("header", "true") // Use first line of all files as header
+        .option("header", header.toString) // Use first line of all files as header
         .option("inferSchema", "true") // Automatically infer data types
         .load(FILE_PREFIX + file)
        df
