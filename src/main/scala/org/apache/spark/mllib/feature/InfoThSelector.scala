@@ -48,7 +48,7 @@ import scala.collection.mutable.HashMap
 @Since("1.6.0")
 class InfoThSelectorModel @Since("1.6.0") (
     @Since("1.6.0") val selectedFeatures: Array[Int],
-    @Since("1.6.0") val redMap: HashMap[Int, Array[(Int, Float)]] = HashMap[Int, Array[(Int, Float)]]()
+    @Since("1.6.0") val redMap: HashMap[Int, Array[(Int, (Float, Float))]] = HashMap[Int, Array[(Int, (Float, Float))]]()
 ) extends VectorTransformer with Saveable {
 
   require(isSorted(selectedFeatures), "Array has to be sorted asc")
@@ -201,7 +201,8 @@ object InfoThSelectorModel extends Loader[InfoThSelectorModel] {
 class InfoThSelector @Since("1.6.0") (
   val criterionFactory: FT,
   val nToSelect: Int = 25,
-  val numPartitions: Int = 0
+  val numPartitions: Int = 0,
+  val redundancyMatrix: breeze.linalg.DenseMatrix[Float]
 )
     extends Serializable with Logging {
 
@@ -215,7 +216,7 @@ class InfoThSelector @Since("1.6.0") (
     originalNPart: Int
   )
   
-  var redundancyMap = new HashMap[Int, Array[(Int, Float)]]()
+  var redundancyMap = new HashMap[Int, Array[(Int, (Float, Float))]]()
 
   /**
    * Performs a info-theory FS process.
@@ -248,9 +249,18 @@ class InfoThSelector @Since("1.6.0") (
       val crit = criterionFactory.getCriterion.init(Float.NegativeInfinity)
       crit.setValid(false)
     }
+    val poolColl = Array.fill[InfoThCriterion](nFeatures - 1) {
+      val crit = criterionFactory.getCriterion.init(Float.NegativeInfinity)
+      crit.setValid(false)
+    }
+    
     relevances.collect().foreach {
       case (x, mi) =>
         pool(x) = criterionFactory.getCriterion.init(mi.toFloat)
+    }
+    relevances.collect().foreach {
+      case (x, mi) =>
+        poolColl(x) = criterionFactory.getCriterion.init(mi.toFloat)
     }
 
     // Print most relevant features
@@ -262,8 +272,10 @@ class InfoThSelector @Since("1.6.0") (
     // Get the maximum and initialize the set of selected features with it
     val (max, mid) = pool.zipWithIndex.maxBy(_._1.relevance)
     var selected = Seq(F(mid, max.score))
+    var selectedColl = Seq(F(mid, max.score))
     pool(mid).setValid(false)
-
+    poolColl(mid).setValid(false)
+    
     // MIM does not use redundancy, so for this criterion all the features are selected now
     if (criterionFactory.getCriterion.toString == "MIM") {
       selected = topByRelevance.map({ case (id, relv) => F(id, relv) }).reverse
@@ -278,28 +290,41 @@ class InfoThSelector @Since("1.6.0") (
         case sit: InfoTheorySparse => sit.getRedundancies(selected.head.feat)
       }
 
-      val topk = redundancies.collect().map{ case(feat, (mi, _)) => feat -> mi}.sortBy(_._2)
+      // Update criteria with the new redundancy values      
+      redundancies.collect().par.foreach({
+        case (k, (mi, cmi)) =>            
+          pool(k).update(mi.toFloat, cmi.toFloat)
+      })
+      
+      val rawRedColl = redundancyMatrix(::, selected.head.feat).toArray
+          .dropRight(1)
+          .zipWithIndex
+          .filter(_._2 != selected.head.feat)
+      rawRedColl.foreach({
+        case (red, k) =>            
+          poolColl(k).update(red, 0)
+      })        
+      
+
+      val topk = redundancies.collect().map{ case(feat, (mi, _)) => feat -> (mi, pool(feat).score)}.sortBy(_._2._2)
       redundancyMap += selected.head.feat -> topk
       println("Target feature: " + selected.head.feat)
       println("Top Mutual Redundancy: " + topk.slice(0, 10).mkString("\n"))
-
-      // Update criteria with the new redundancy values      
-      redundancies.collect().par.foreach({
-        case (k, (mi, cmi)) =>
-                   
-          pool(k).update(mi.toFloat, cmi.toFloat)
-      })
-
+      
       // select the best feature and remove from the whole set of features
       val (max, maxi) = pool.par.zipWithIndex.filter(_._1.valid).maxBy(_._1)
+      val (_, maxiC) = poolColl.par.zipWithIndex.filter(_._1.valid).maxBy(_._1)
+      
       if (maxi != -1) {
         selected = F(maxi, max.score) +: selected
+        selectedColl = F(maxiC, pool(maxiC).score) +: selectedColl
+        poolColl(maxiC).setValid(false)
         pool(maxi).setValid(false)
       } else {
         moreFeat = false
       }
     }
-    selected.reverse
+    (selected.reverse, selectedColl.reverse)
   }
 
   /**
@@ -411,7 +436,7 @@ class InfoThSelector @Since("1.6.0") (
     }
 
     // Start the main algorithm
-    val selected = selectFeatures(colData, nInstances, nFeatures)
+    val (selected, selectedColl) = selectFeatures(colData, nInstances, nFeatures)
     if (dense) colData.dense.unpersist() else colData.sparse.unpersist()
 
     // Print best features according to the mRMR measure
@@ -419,7 +444,14 @@ class InfoThSelector @Since("1.6.0") (
       case F(feat, rel) =>
         (feat + 1) + "\t" + "%.4f".format(rel)
     }.mkString("\n")
+    val outColl = selectedColl.map {
+      case F(feat, rel) =>
+        (feat + 1) + "\t" + "%.4f".format(rel)
+    }.mkString("\n")
     println("\n*** Selected features ***\nFeature\tScore\n" + out)
+    println("\n*** Selected Coll features ***\nFeature\tScore\n" + outColl)
+    println("\n*** Average scores difference: " +  (selected.map(_.crit).sum - selectedColl.map(_.crit).sum))
+    
     // Features must be sorted
     new InfoThSelectorModel(selected.map { case F(feat, rel) => feat }.sorted.toArray, redundancyMap)
   }

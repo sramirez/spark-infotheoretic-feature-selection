@@ -99,11 +99,9 @@ private[feature] trait InfoThSelectorParams extends Params
  * categorical label.
  */
 @Experimental
-final class InfoThSelector @Since("1.6.0") (@Since("1.6.0") override val uid: String)
+final class InfoThSelector @Since("1.6.0") (redundancyMatrix: breeze.linalg.DenseMatrix[Float],
+    @Since("1.6.0") override val uid: String = Identifiable.randomUID("InfoThSelector"))
     extends Estimator[InfoThSelectorModel] with InfoThSelectorParams with DefaultParamsWritable {
-
-  @Since("1.6.0")
-  def this() = this(Identifiable.randomUID("InfoThSelector"))
 
   /** @group setParam */
   @Since("1.6.0")
@@ -141,7 +139,8 @@ final class InfoThSelector @Since("1.6.0") (@Since("1.6.0") override val uid: St
     val InfoThSelector = new feature.InfoThSelector(
       new InfoThCriterionFactory($(selectCriterion)),
       $(numTopFeatures),
-      $(nPartitions)
+      $(nPartitions),
+      redundancyMatrix
     ).fit(input)
     copyValues(new InfoThSelectorModel(uid, InfoThSelector).setParent(this))
   }
@@ -178,7 +177,7 @@ final class InfoThSelectorModel private[ml] (
   /** list of indices to select (filter). Must be ordered asc */
   val selectedFeatures: Array[Int] = InfoThSelector.selectedFeatures
   
-  val redMap: HashMap[Int, Array[(Int, Float)]] = InfoThSelector.redMap
+  val redMap: HashMap[Int, Array[(Int, (Float, Float))]] = InfoThSelector.redMap
 
   /** @group setParam */
   def setFeaturesCol(value: String): this.type = set(featuresCol, value)

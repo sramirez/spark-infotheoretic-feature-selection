@@ -30,63 +30,6 @@ object TestHelper {
   
   def log2(x: Float) = { math.log(x) / math.log(2) }
 
-  /**
-    * @return the feature select fit to the data given the specified features to bin and label use as target.
-    */
-  
-  def createSelectorModel(sqlContext: SQLContext, dataframe: DataFrame, inputCols: Array[String],
-                             labelColumn: String,
-                             nPartitions: Int = 100,
-                             numTopFeatures: Int = 20, 
-                             allVectorsDense: Boolean = true,
-                             padded: Int = 0 /* if minimum value is negative */): InfoThSelectorModel = {
-    val featureAssembler = new VectorAssembler()
-      .setInputCols(inputCols)
-      .setOutputCol("features")
-    val processedDf = featureAssembler.transform(dataframe).select(labelColumn + INDEX_SUFFIX, "features")
-    
-    /** InfoSelector requires all vectors from the same type (either be sparse or dense) **/
-    val rddData = processedDf.rdd.map {
-        case Row(label: Double, features: Vector) =>
-          val standardv = if(allVectorsDense){
-            Vectors.dense(features.toArray.map(_ + padded))
-          } else {
-              val sparseVec = features.toSparse
-              val newValues: Array[Double] = sparseVec.values.map(_ + padded)
-              Vectors.sparse(sparseVec.size, sparseVec.indices, newValues)
-          }
-          
-          Row.fromSeq(Seq(label, standardv))
-      }
-    
-    val inputData = sqlContext.createDataFrame(rddData, processedDf.schema)
-      
-    val selector = new InfoThSelector()
-        .setSelectCriterion("mrmr")
-        .setNPartitions(nPartitions)
-        .setNumTopFeatures(numTopFeatures)
-        .setFeaturesCol("features")// this must be a feature vector
-        .setLabelCol(labelColumn + INDEX_SUFFIX)
-        .setOutputCol("selectedFeatures")
-
-    selector.fit(inputData)
-  }
-
-
-  /**
-    * The label column will have null values replaced with MISSING values in this case.
-    * @return the feature selector fit to the data given the specified features to bin and label use as target.
-    */
-  def getSelectorModel(sqlContext: SQLContext, dataframe: DataFrame, inputCols: Array[String],
-                          labelColumn: String,
-                             nPartitions: Int = 100,
-                             numTopFeatures: Int = 20,
-                             allVectorsDense: Boolean = true,
-                             padded: Int = 0): InfoThSelectorModel = {
-    val processedDf = cleanLabelCol(dataframe, labelColumn)
-    createSelectorModel(sqlContext, processedDf, inputCols, labelColumn, 
-        nPartitions, numTopFeatures, allVectorsDense, padded)
-  }
 
 
   def cleanLabelCol(dataframe: DataFrame, labelColumn: String): DataFrame = {

@@ -35,7 +35,7 @@ object MainMLlibTest {
     
     val initStartTime = System.nanoTime()
     
-    val conf = new SparkConf().setAppName("CollisionFS Test").setMaster("spark://ulises:7077")
+    val conf = new SparkConf().setAppName("CollisionFS Test").setMaster("local[*]")
     val sc = new SparkContext(conf)
     sqlContext = new SQLContext(sc)
 
@@ -214,6 +214,7 @@ object MainMLlibTest {
       
       val model = discretizer.fit(processedDF)
       processedDF = model.transform(processedDF)
+      processedDF.show
     }
     processedDF
   }
@@ -244,49 +245,87 @@ object MainMLlibTest {
     //println("inputData: " + inputData.first.toString())
     println("schema: " + schema.toString())
     
-    val selector = new InfoThSelector()
+    val selector = new InfoThSelector(redundancyMatrix)
         .setSelectCriterion("mrmr")
         .setNPartitions(nPartitions)
         .setNumTopFeatures(nTop)
-        .setFeaturesCol(inputLabel)// this must be a feature vector
+        .setFeaturesCol(inputLabel) // this must be a feature vector
         .setLabelCol(clsLabel)
         .setOutputCol("selectedFeatures")
         
-
-    
     val model = selector.fit(inputData)
-    
-    model.selectedFeatures.foreach{sf => 
+    compareRedundancies(model, redundancyMatrix, order)    
+  }
+  
+  def compareRedundancies(model: InfoThSelectorModel, 
+      redundancyMatrix: breeze.linalg.DenseMatrix[Float],
+      order: Int) {
+        
+    model.selectedFeatures.foreach{ sf => 
         model.redMap.get(sf) match {
-          case Some(redByFeature) => 
-            val redCollisions = redundancyMatrix(::,sf).toArray.dropRight(1).zipWithIndex
-              .filter(_._2 != sf)
-              .sortBy(_._1 * order)
-            val rankingInfo = redByFeature.sortBy(_._2 * order).map(_._1).slice(0, nTop)
-            val rankingCollisions = redCollisions.map(_._2)
+          case Some(redByFeature) =>
+            // InfoTheoretic
+            val avgInfo = redByFeature.map(_._2._1).sum / redByFeature.length
+            val devInfo = Math.sqrt((redByFeature.map(_._2._1).map(_ - avgInfo).map(t => t*t).sum) / redByFeature.length).toFloat
+            
+            val normRedInfo = redByFeature.map{ case(id, (score, _)) => id -> ((score - avgInfo) / devInfo)}
+            val rankingInfoTh = normRedInfo
+              .sortBy(_._2 * order)  
+              .slice(0, nTop)
               .zipWithIndex
-              .toMap
+              .map{case ((id, score), rank) =>
+                id -> (rank, score)  
+              }
+              
+            
+            // Collision version
+            val rawRedColl = redundancyMatrix(::,sf).toArray
+              .dropRight(1)
+              .zipWithIndex
+              .filter(_._2 != sf)
+            
+            val avgColl = rawRedColl.map(_._1).sum / rawRedColl.length
+            val devColl = Math.sqrt((rawRedColl.map(_._1).map( _ - avgColl).map(t => t*t).sum) / rawRedColl.length).toFloat
+            
+            val normRedColl = rawRedColl.map{ case(score, id) => (score - avgColl) / devColl.toFloat -> id} 
+            val rankingCollisions = normRedColl
+              .sortBy(_._1 * order)
+              .zipWithIndex
+              .map{case ((score, id), rank) =>
+                id -> (rank, score)  
+              }
               
              // Compute average distance between rankings
-            var sum = 0.0f
-            rankingInfo.zipWithIndex.foreach{ case(f, r1) =>
-              val r2 = rankingCollisions.getOrElse(f, -1)
-              val dif = if(r2 > 0) {
-                sum += math.abs(r2 - r1)
+            val mapRankingCollisions = rankingCollisions.toMap
+            var sumDifRankings = 0.0f
+            rankingInfoTh.foreach{ case(f, (rank1, _)) =>
+              val (rank2, _) = mapRankingCollisions.getOrElse(f, -1 -> -1.0f)
+              if(rank2 > 0) {
+                sumDifRankings += math.abs(rank1 - rank2)
               }
             }
-                       
+              
+            // Compute average distance between scores
+            var sumDifScores = 0.0f
+            rankingInfoTh.foreach{ case(f, (_, score1)) =>
+              val (_, score2) = mapRankingCollisions.getOrElse(f, -1 -> Float.NaN)
+              if(score2 != Float.NaN) {
+                sumDifScores += math.abs(score1 - score2)
+              }
+            }
+              
+            // Compute final statistics
             println("Feature target: " + sf)            
-            println("Avg. distance by feature: " + sum / nTop)
-            println("# distinct features: " + rankingInfo.toSet.diff(
-               redCollisions.slice(0, nTop).map(_._2).toSet).toString())
-           
-            println("Values: " + redCollisions.slice(0, nTop).mkString("\n"))
+            println("Avg. ranking distance by feature: " + sumDifRankings / rankingInfoTh.size)
+            println("Avg. score distance by feature: " + sumDifScores / rankingInfoTh.size)
+            println("# distinct features: " + rankingInfoTh.map(_._1).toSet.diff(
+                rankingCollisions.slice(0, nTop).map(_._1).toSet))           
+            println("InfoTh Values: " + rankingInfoTh.mkString("\n"))
+            println("Collision Values: " + rankingCollisions.slice(0, nTop).mkString("\n"))
            
           case None => println("That didn't work.")
         }
     }
-    
   }
   
   def log2(x: Float) = { math.log(x) / math.log(2) }

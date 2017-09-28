@@ -20,7 +20,7 @@ package org.apache.spark.mllib.feature
 /**
  * Trait which declares needed methods to define a criterion for Feature Selection
  */
-trait InfoThCriterion extends Serializable with Ordered[InfoThCriterion] {
+trait InfoThCriterion extends Serializable with Ordered[InfoThCriterion] with Cloneable {
 
   var relevance: Float = 0.0f
   var valid: Boolean = true
