@@ -21,7 +21,7 @@ import org.apache.spark.ml.Pipeline
 object MainMLlibTest {
   var sqlContext: SQLContext = null
   var pathFile = "test_lung_s3.csv"
-  var order = 1 // Note: -1 means descending
+  var order = -1 // Note: -1 means descending
   var nPartitions = 1
   var nTop = 10
   var discretize = false
@@ -67,7 +67,8 @@ object MainMLlibTest {
     val rawDF = TestHelper.readCSVData(sqlContext, pathFile, firstHeader)
     val df = preProcess(rawDF).select(clsLabel, inputLabel)
     val allVectorsDense = true
-    
+ 
+    df.show
     println("df: " + df.first().toString())
     
     val origRDD = initRDD(df, allVectorsDense)
@@ -149,8 +150,12 @@ object MainMLlibTest {
     val joint = accJoint.value.toDenseMatrix.mapValues(_.toFloat)
     joint :/= total.value.toFloat 
     val conditional = accConditional.value.toDenseMatrix.mapValues(_.toFloat)
-    conditional :/= total.value.toFloat
+    conditional :/= total.value.toFloat    
   
+    println("Marginal 12: " + marginal(12))
+    
+    println("Join 12: " + joint(12, 17))
+    
     // Compute mutual information using collisions with and without class
     val redundancyMatrix = breeze.linalg.DenseMatrix.zeros[Float](nf, nf)
     joint.activeIterator.foreach { case((i1,i2), value) =>
@@ -319,9 +324,10 @@ object MainMLlibTest {
             println("Avg. ranking distance by feature: " + sumDifRankings / rankingInfoTh.size)
             println("Avg. score distance by feature: " + sumDifScores / rankingInfoTh.size)
             println("# distinct features: " + rankingInfoTh.map(_._1).toSet.diff(
-                rankingCollisions.slice(0, nTop).map(_._1).toSet))           
+                rankingCollisions.slice(0, nTop).map(_._1).toSet))    
+                
             println("InfoTh Values: " + rankingInfoTh.mkString("\n"))
-            println("Collision Values: " + rankingCollisions.slice(0, nTop).mkString("\n"))
+            println("Collision Values: " + rankingCollisions.mkString("\n"))
            
           case None => println("That didn't work.")
         }
