@@ -16,6 +16,9 @@ import com.github.karlhigley.spark.neighbors.util.BoundedPriorityQueue
 import breeze.stats.MeanAndVariance
 import breeze.stats.DescriptiveStats
 import breeze.linalg.mapValues
+import scala.collection.mutable.ArrayBuffer
+import org.apache.spark.mllib.feature.InfoThCriterion
+import org.apache.spark.mllib.feature.InfoThCriterionFactory
 
 
 /**
@@ -36,7 +39,12 @@ object MainMLlibTest {
   var inputLabel: String = "features"
   var firstHeader: Boolean = false
   var k: Int = 5
-
+  var nselect: Int = 10
+  
+  
+  // Case class for criteria/feature
+  protected case class F(feat: Int, crit: Double)
+  
   def main(args: Array[String]) {
     
     val initStartTime = System.nanoTime()
@@ -45,7 +53,7 @@ object MainMLlibTest {
     val sc = new SparkContext(conf)
     sqlContext = new SQLContext(sc)
 
-    println("Usage: MLlibTest --train-file=\"hdfs://blabla\" --npart=1 --k=5 --ntop=10 --disc=false --padded=2 --class-last=true --header=false")
+    println("Usage: MLlibTest --train-file=\"hdfs://blabla\" --nselect=10 --npart=1 --k=5 --ntop=10 --disc=false --padded=2 --class-last=true --header=false")
         
     // Create a table of parameters (parsing)
     val params = args.map{ arg =>
@@ -64,10 +72,11 @@ object MainMLlibTest {
     classLastIndex = params.getOrElse("class-last", "false").toBoolean
     firstHeader = params.getOrElse("header", "false").toBoolean
     k = params.getOrElse("k", "5").toInt
+    nselect = params.getOrElse("nselect", "10").toInt
     
     println("Params used: " +  params.mkString("\n"))
     
-    doComparison()
+    doRELIEFComparison()
   }
   
   def doComparison() {
@@ -158,10 +167,6 @@ object MainMLlibTest {
     joint :/= total.value.toFloat 
     val conditional = accConditional.value.toDenseMatrix.mapValues(_.toFloat)
     conditional :/= total.value.toFloat    
-  
-    println("Marginal 12: " + marginal(12))
-    
-    println("Join 12: " + joint(12, 17))
     
     // Compute mutual information using collisions with and without class
     val redundancyMatrix = breeze.linalg.DenseMatrix.zeros[Float](nf, nf)
@@ -208,6 +213,7 @@ object MainMLlibTest {
     println("# instances: " + rdd.count)
     println("# partitions: " + rdd.partitions.size)
     val knn = k
+    val discrete = discretize
     val priorClass = rdd.map(_.label).countByValue().mapValues(_ / nelems.toFloat)
     val nClasses = priorClass.size
     
@@ -219,8 +225,8 @@ object MainMLlibTest {
         val joint = breeze.linalg.DenseMatrix.zeros[Long](nf, nf)
         
         val elements = it.toArray
-        val neighDist = breeze.linalg.DenseMatrix.fill(elements.size, elements.size){Double.MinValue}
-        
+        val neighDist = breeze.linalg.DenseMatrix.fill(
+              elements.size, elements.size){Double.MinValue}
         val ordering = Ordering[Double].on[(Double, Int)](_._1).reverse
             
         (0 until elements.size).map{ id1 =>
@@ -228,15 +234,21 @@ object MainMLlibTest {
           var topk = Array.fill[BoundedPriorityQueue[(Double, Int)]](nClasses)(
                 new BoundedPriorityQueue[(Double, Int)](knn)(ordering))
           (0 until elements.size).map{ id2 => 
-            if(neighDist(id1, id2) < 0){
+            
+            if(neighDist(id2, id1) < 0){
+              // Compute collisions and distance
               val e2 = elements(id2)              
-              var set = new TreeSet[Int]()
+              var collisioned = ArrayBuffer[Int]()
               val clshit = e1.label == e2.label
               e1.features.foreachActive{ (index, value) =>
-                 val dist = math.pow(value - e2.features(index), 2)
+                 val dist = if(discrete){
+                   if (value != e2.features(index)) 1 else 0
+                 }  else {
+                   math.pow(value - e2.features(index), 2) 
+                 }
                  if(dist == 0){
                      marginal(index) += 1
-                     set += index
+                     collisioned += index
                  }
                  neighDist(id1, id2) += dist
               }
@@ -246,24 +258,29 @@ object MainMLlibTest {
               // Count matches in output feature
               if(clshit){          
                 marginal(last) += 1
-                set += last
+                collisioned += last
               }
               
               // Generate combinations and update joint collisions counter
-              val arr = set.toArray
-              (0 until arr.size).map{f1 => 
-                (f1 + 1 until arr.size).map{ f2 =>
-                  joint(arr(f1), arr(f2)) += 1
+              (0 until collisioned.size).map{f1 => 
+                (f1 + 1 until collisioned.size).map{ f2 =>
+                  joint(collisioned(f1), collisioned(f2)) += 1
                 }         
               }
-              total.add(1L)
+              total.add(1L) // use to compute likelihoods (denom)
+            } else {
+              topk(elements(id2).label.toInt) += neighDist(id2, id1) -> id2              
             }                      
         }
         // RELIEF-F computations        
         e1.features.foreachActive{ case (index, value) =>
           val weight = (0 until nClasses).map{ cls => 
             val sum = topk(cls).map{ case(_, id2) =>
-              elements(id2).features(index) - value         
+               if(discrete){
+                 if (value != elements(id2).features(index)) 1 else 0
+               }  else {
+                 math.pow(value - elements(id2).features(index), 2) 
+               }
             }.sum
             if(cls != elements(id1).label){
               sum.toFloat * priorClass.getOrElse(cls, 0.0f) / topk(cls).size 
@@ -274,9 +291,10 @@ object MainMLlibTest {
           reliefWeights(index) += weight       
         }
       }
-        
+      // update accumulated matrices  
       accMarginal.add(marginal)
       accJoint.add(joint)
+      
       reliefWeights.iterator      
     }.reduceByKey(_ + _).cache
     
@@ -304,9 +322,61 @@ object MainMLlibTest {
     
     import breeze.stats._ 
     val stats = meanAndVariance(redundancyMatrix)
-    val normRedundancyMatrix = redundancyMatrix.mapValues{ value => (value - stats.mean) / stats.stdDev}
-    compareSolutions(origRDD, df.schema, redundancyMatrix)
+    val normRedundancyMatrix = redundancyMatrix.mapValues{ value => ((value - stats.mean) / stats.stdDev).toFloat}
+    
+    val reliefCollisionRanking = selectFeatures(nf, reliefRanking.collect, normRedundancyMatrix)
   }
+  
+  def selectFeatures(nfeatures: Int, reliefRanking: Array[(Int, Float)],
+      redundancyMatrix: breeze.linalg.DenseMatrix[Float]) = {
+    
+    // Initialize all (except the class) criteria with the relevance values
+    val criterionFactory = new InfoThCriterionFactory("mrmr")
+    val pool = Array.fill[InfoThCriterion](nfeatures - 1) {
+      val crit = criterionFactory.getCriterion.init(Float.NegativeInfinity)
+      crit.setValid(false)
+    }
+    
+    reliefRanking.foreach {
+      case (x, mi) =>
+        pool(x) = criterionFactory.getCriterion.init(mi.toFloat)
+    }
+
+    // Get the maximum and initialize the set of selected features with it
+    val (max, mid) = pool.zipWithIndex.maxBy(_._1.relevance)
+    var selected = Seq(F(mid, max.score))
+    pool(mid).setValid(false)
+    
+    var moreFeat = true
+    // Iterative process for redundancy and conditional redundancy
+    while (selected.size < nselect && moreFeat) {
+
+      val redundancies =  redundancyMatrix(::, selected.head.feat)
+              .toArray
+              .dropRight(1)
+              .zipWithIndex
+              .filter(_._2 != selected.head.feat)
+
+      // Update criteria with the new redundancy values      
+      redundancies.par.foreach({
+        case (mi, k) =>            
+          pool(k).update(mi.toFloat, 0.0f)
+      })
+      
+      // select the best feature and remove from the whole set of features
+      val (max, maxi) = pool.par.zipWithIndex.filter(_._1.valid).maxBy(_._1)
+      
+      if (maxi != -1) {
+        selected = F(maxi, max.score) +: selected
+        pool(maxi).setValid(false)
+      } else {
+        moreFeat = false
+      }
+    }
+    selected.reverse
+    
+  }
+  
   
   
   def preProcess(df: DataFrame) = {
