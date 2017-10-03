@@ -39,6 +39,7 @@ object MainMLlibTest {
   var inputLabel: String = "features"
   var firstHeader: Boolean = false
   var k: Int = 5
+  var categorical: Boolean = false
   var nselect: Int = 10
   
   
@@ -53,7 +54,7 @@ object MainMLlibTest {
     val sc = new SparkContext(conf)
     sqlContext = new SQLContext(sc)
 
-    println("Usage: MLlibTest --train-file=\"hdfs://blabla\" --nselect=10 --npart=1 --k=5 --ntop=10 --disc=false --padded=2 --class-last=true --header=false")
+    println("Usage: MLlibTest --train-file=\"hdfs://blabla\" --nselect=10 --npart=1 --categorical=false --k=5 --ntop=10 --disc=false --padded=2 --class-last=true --header=false")
         
     // Create a table of parameters (parsing)
     val params = args.map{ arg =>
@@ -73,10 +74,13 @@ object MainMLlibTest {
     firstHeader = params.getOrElse("header", "false").toBoolean
     k = params.getOrElse("k", "5").toInt
     nselect = params.getOrElse("nselect", "10").toInt
+    categorical = params.getOrElse("categorical", "false").toBoolean
+    
     
     println("Params used: " +  params.mkString("\n"))
     
     doRELIEFComparison()
+    //doComparison()
   }
   
   def doComparison() {
@@ -179,7 +183,9 @@ object MainMLlibTest {
       }
         
     }
-    compareSolutions(origRDD, df.schema, redundancyMatrix)
+    
+    val model = fitMRMR(origRDD, df.schema)
+    compareRedundancies(model, redundancyMatrix, order) 
   }
   
   
@@ -213,13 +219,14 @@ object MainMLlibTest {
     println("# instances: " + rdd.count)
     println("# partitions: " + rdd.partitions.size)
     val knn = k
-    val discrete = discretize
-    val priorClass = rdd.map(_.label).countByValue().mapValues(_ / nelems.toFloat)
+    val norminal = categorical
+    val priorClass = rdd.map(_.label).countByValue().mapValues(_ / nelems.toFloat).map(identity)
+    val bpriorClass = rdd.context.broadcast(priorClass)
     val nClasses = priorClass.size
     
     val reliefRanking = rdd.mapPartitions { it =>
         
-        val reliefWeights = breeze.linalg.DenseVector.fill(nf){0.0f}
+        val reliefWeights = breeze.linalg.DenseVector.fill(nf - 1){0.0f}
         val marginal = breeze.linalg.DenseVector.zeros[Long](nf)
         val last = marginal.size - 1
         val joint = breeze.linalg.DenseMatrix.zeros[Long](nf, nf)
@@ -227,8 +234,8 @@ object MainMLlibTest {
         val elements = it.toArray
         val neighDist = breeze.linalg.DenseMatrix.fill(
               elements.size, elements.size){Double.MinValue}
-        val ordering = Ordering[Double].on[(Double, Int)](_._1).reverse
-            
+        val ordering = Ordering[Double].on[(Double, Int)](_._1)
+        
         (0 until elements.size).map{ id1 =>
           val e1 = elements(id1)
           var topk = Array.fill[BoundedPriorityQueue[(Double, Int)]](nClasses)(
@@ -241,7 +248,7 @@ object MainMLlibTest {
               var collisioned = ArrayBuffer[Int]()
               val clshit = e1.label == e2.label
               e1.features.foreachActive{ (index, value) =>
-                 val dist = if(discrete){
+                 val dist = if(norminal){
                    if (value != e2.features(index)) 1 else 0
                  }  else {
                    math.pow(value - e2.features(index), 2) 
@@ -274,16 +281,16 @@ object MainMLlibTest {
         }
         // RELIEF-F computations        
         e1.features.foreachActive{ case (index, value) =>
-          val weight = (0 until nClasses).map{ cls => 
+          val weight = (0 until nClasses).map { cls => 
             val sum = topk(cls).map{ case(_, id2) =>
-               if(discrete){
+               if(norminal){
                  if (value != elements(id2).features(index)) 1 else 0
                }  else {
                  math.pow(value - elements(id2).features(index), 2) 
                }
             }.sum
             if(cls != elements(id1).label){
-              sum.toFloat * priorClass.getOrElse(cls, 0.0f) / topk(cls).size 
+              sum.toFloat * bpriorClass.value.getOrElse(cls, 0.0f) / topk(cls).size 
             } else {
               -sum.toFloat / topk(cls).size 
             }
@@ -300,7 +307,7 @@ object MainMLlibTest {
     
     val avgRelief = reliefRanking.values.mean()
     val stdRelief = reliefRanking.values.stdev()
-    val normalizedRelief = reliefRanking.mapValues(score => (score - avgRelief) / stdRelief)
+    val normalizedRelief = reliefRanking.mapValues(score => ((score - avgRelief) / stdRelief).toFloat).collect()
     
   
     val marginal = accMarginal.value.mapValues(_.toFloat) 
@@ -312,19 +319,27 @@ object MainMLlibTest {
     val redundancyMatrix = breeze.linalg.DenseMatrix.zeros[Float](nf, nf)
     joint.activeIterator.foreach { case((i1,i2), value) =>
       if(i1 < i2 && i1 != nf - 1 && i2 != nf - 1){
-        val red = value * log2(value / (marginal(i1) * marginal(i2))).toFloat        
-        
+        val red = value * log2(value / (marginal(i1) * marginal(i2))).toFloat              
         redundancyMatrix(i1, i2) = red
         redundancyMatrix(i2, i1) = red        
-      }
-        
+      }        
     }
     
     import breeze.stats._ 
     val stats = meanAndVariance(redundancyMatrix)
-    val normRedundancyMatrix = redundancyMatrix.mapValues{ value => ((value - stats.mean) / stats.stdDev).toFloat}
+    val normRedundancyMatrix = redundancyMatrix.mapValues{ value => ((value - stats.mean) / stats.stdDev).toFloat }    
+    val selected = selectFeatures(nf, normalizedRelief, normRedundancyMatrix)
+    val model = fitMRMR(origRDD, df.schema)
     
-    val reliefCollisionRanking = selectFeatures(nf, reliefRanking.collect, normRedundancyMatrix)
+    // Print best features according to the mRMR measure
+    val out = selected.map {
+      case F(feat, rel) =>
+        (feat + 1) + "\t" + "%.4f".format(rel)
+    }.mkString("\n")
+    println("\n*** RELIEF + Collisions selected features ***\nFeature\tScore\n" + out)
+    
+    println("\n*** RELIEF selected features: " + normalizedRelief.sortBy(_._2 * order).slice(0, 50).mkString("\n"))
+    
   }
   
   def selectFeatures(nfeatures: Int, reliefRanking: Array[(Int, Float)],
@@ -351,7 +366,7 @@ object MainMLlibTest {
     // Iterative process for redundancy and conditional redundancy
     while (selected.size < nselect && moreFeat) {
 
-      val redundancies =  redundancyMatrix(::, selected.head.feat)
+      val redundancies = redundancyMatrix(::, selected.head.feat)
               .toArray
               .dropRight(1)
               .zipWithIndex
@@ -428,6 +443,7 @@ object MainMLlibTest {
       val model = discretizer.fit(processedDF)
       processedDF = model.transform(processedDF)
       processedDF.show
+      categorical = true
     }
     processedDF
   }
@@ -447,10 +463,8 @@ object MainMLlibTest {
     }
   }
   
-  def compareSolutions(rdd: RDD[Row], schema: StructType,
-      redundancyMatrix: breeze.linalg.DenseMatrix[Float]) {
-    
-    // Return results
+  def fitMRMR(rdd: RDD[Row], schema: StructType) = {
+  // Return results
     val inputData = sqlContext.createDataFrame(rdd, schema).cache()
     val cls = if(classLastIndex) inputData.columns.last else inputData.columns.head
     println("Columns class: " + cls)
@@ -458,7 +472,7 @@ object MainMLlibTest {
     //println("inputData: " + inputData.first.toString())
     println("schema: " + schema.toString())
     
-    val selector = new InfoThSelector(redundancyMatrix)
+    val selector = new InfoThSelector()
         .setSelectCriterion("mrmr")
         .setNPartitions(nPartitions)
         .setNumTopFeatures(nTop)
@@ -466,8 +480,7 @@ object MainMLlibTest {
         .setLabelCol(clsLabel)
         .setOutputCol("selectedFeatures")
         
-    val model = selector.fit(inputData)
-    compareRedundancies(model, redundancyMatrix, order)    
+    selector.fit(inputData)
   }
   
   def compareRedundancies(model: InfoThSelectorModel, 

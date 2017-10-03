@@ -99,8 +99,7 @@ private[feature] trait InfoThSelectorParams extends Params
  * categorical label.
  */
 @Experimental
-final class InfoThSelector @Since("1.6.0") (redundancyMatrix: breeze.linalg.DenseMatrix[Float],
-    @Since("1.6.0") override val uid: String = Identifiable.randomUID("InfoThSelector"))
+final class InfoThSelector @Since("1.6.0") (@Since("1.6.0") override val uid: String = Identifiable.randomUID("InfoThSelector"))
     extends Estimator[InfoThSelectorModel] with InfoThSelectorParams with DefaultParamsWritable {
 
   /** @group setParam */
@@ -139,8 +138,7 @@ final class InfoThSelector @Since("1.6.0") (redundancyMatrix: breeze.linalg.Dens
     val InfoThSelector = new feature.InfoThSelector(
       new InfoThCriterionFactory($(selectCriterion)),
       $(numTopFeatures),
-      $(nPartitions),
-      redundancyMatrix
+      $(nPartitions)
     ).fit(input)
     copyValues(new InfoThSelectorModel(uid, InfoThSelector).setParent(this))
   }
