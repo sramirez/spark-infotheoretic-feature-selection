@@ -19,6 +19,8 @@ import breeze.linalg.mapValues
 import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.mllib.feature.InfoThCriterion
 import org.apache.spark.mllib.feature.InfoThCriterionFactory
+import org.apache.spark.ml.classification.NaiveBayes
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 
 
 /**
@@ -83,111 +85,6 @@ object MainMLlibTest {
     //doComparison()
   }
   
-  def doComparison() {
-    val rawDF = TestHelper.readCSVData(sqlContext, pathFile, firstHeader)
-    val df = preProcess(rawDF).select(clsLabel, inputLabel)
-    val allVectorsDense = true
- 
-    df.show
-    println("df: " + df.first().toString())
-    
-    val origRDD = initRDD(df, allVectorsDense)
-    val rdd = origRDD.map {
-      case Row(label: Double, features: Vector) =>
-        LabeledPoint(label, features)
-    }.repartition(nPartitions).cache //zipwithUniqueIndexs
-    
-    println("rdd: " + rdd.first().toString())
-    
-    //val elements = rdd.collect
-    val nf = rdd.first.features.size + 1
-    //val belems = rdd.context.broadcast(elements)
-    
-    val accMarginal = new VectorAccumulator(nf)
-    // Then, register it into spark context:
-    rdd.context.register(accMarginal, "marginal")
-    val accJoint = new MatrixAccumulator(nf, nf)
-    rdd.context.register(accJoint, "joint")
-    val accConditional = new MatrixAccumulator(nf, nf)
-    rdd.context.register(accConditional, "conditional")
-    val total = rdd.context.longAccumulator("total")
-    println("# instances: " + rdd.count)
-    println("# partitions: " + rdd.partitions.size)
-    
-    rdd.foreachPartition { it =>
-        
-        val marginal = breeze.linalg.DenseVector.zeros[Long](nf)
-        val last = marginal.size - 1
-        val joint = breeze.linalg.DenseMatrix.zeros[Long](nf, nf)
-        val condjoint = breeze.linalg.DenseMatrix.zeros[Long](nf, nf)
-        //val others = belems.value
-        val elements = it.toArray
-        (0 until elements.size).map{ id1 =>
-        //while(it.hasNext){
-          //val (e1, id1) = it.next
-          val e1 = elements(id1)
-          //others.foreach{ case (e2, id2) => 
-          (id1 + 1 until elements.size).map{ id2 => 
-            val e2 = elements(id2)
-            //if(id1 > id2) {
-            if(true) {
-                var set = new TreeSet[Int]()
-                val clshit = e1.label == e2.label
-                e1.features.foreachActive{ (index, value) =>
-                   if(e1.features(index) == e2.features(index)){
-                       marginal(index) += 1
-                       set += index
-                   }            
-                }
-                
-                // Count matches in output feature
-                if(clshit){          
-                  marginal(last) += 1
-                  set += last
-                }
-                
-                // Generate combinations and update joint collisions counter
-                val arr = set.toArray
-                (0 until arr.size).map{f1 => 
-                  (f1 + 1 until arr.size).map{ f2 =>
-                    joint(arr(f1), arr(f2)) += 1
-                    if(clshit)
-                      condjoint(arr(f1), arr(f2)) += 1
-                  }         
-                }
-              total.add(1L)
-            }            
-        }
-      }
-        
-      accMarginal.add(marginal)
-      accJoint.add(joint)
-      accConditional.add(condjoint)
-    }
-  
-    val marginal = accMarginal.value.mapValues(_.toFloat) 
-    marginal :/= total.value.toFloat 
-    val joint = accJoint.value.toDenseMatrix.mapValues(_.toFloat)
-    joint :/= total.value.toFloat 
-    val conditional = accConditional.value.toDenseMatrix.mapValues(_.toFloat)
-    conditional :/= total.value.toFloat    
-    
-    // Compute mutual information using collisions with and without class
-    val redundancyMatrix = breeze.linalg.DenseMatrix.zeros[Float](nf, nf)
-    joint.activeIterator.foreach { case((i1,i2), value) =>
-      if(i1 < i2 && i1 != nf - 1 && i2 != nf - 1){
-        val red = value * log2(value / (marginal(i1) * marginal(i2))).toFloat        
-        
-        redundancyMatrix(i1, i2) = red
-        redundancyMatrix(i2, i1) = red        
-      }
-        
-    }
-    
-    val model = fitMRMR(origRDD, df.schema)
-    compareRedundancies(model, redundancyMatrix, order) 
-  }
-  
   
   def doRELIEFComparison() {
     val rawDF = TestHelper.readCSVData(sqlContext, pathFile, firstHeader)
@@ -202,8 +99,11 @@ object MainMLlibTest {
       case Row(label: Double, features: Vector) =>
         LabeledPoint(label, features)
     }.repartition(nPartitions).cache //zipwithUniqueIndexs
+    println("rdd: " + rdd.first().toString())   
     
-    println("rdd: " + rdd.first().toString())
+    //Dataframe version
+    val inputData = sqlContext.createDataFrame(origRDD, df.schema).cache()
+    println("Schema: " + df.schema)
     
     //val elements = rdd.collect
     val nf = rdd.first.features.size + 1
@@ -328,18 +228,46 @@ object MainMLlibTest {
     import breeze.stats._ 
     val stats = meanAndVariance(redundancyMatrix)
     val normRedundancyMatrix = redundancyMatrix.mapValues{ value => ((value - stats.mean) / stats.stdDev).toFloat }    
-    val selected = selectFeatures(nf, normalizedRelief, normRedundancyMatrix)
-    val model = fitMRMR(origRDD, df.schema)
+    val reliefSelected = selectFeatures(nf, normalizedRelief, normRedundancyMatrix)    
+    val reliefModel = new InfoThSelectorModel("", new org.apache.spark.mllib.feature.InfoThSelectorModel(
+        selectedFeatures = reliefSelected.map { case F(feat, rel) => feat }.sorted.toArray))
+          .setOutputCol("selectedFeatures")
+          .setFeaturesCol(inputLabel) // this must be a feature vector
+          .setLabelCol(clsLabel)
     
-    // Print best features according to the mRMR measure
-    val out = selected.map {
-      case F(feat, rel) =>
-        (feat + 1) + "\t" + "%.4f".format(rel)
-    }.mkString("\n")
+    // Print best features according to the RELIEF-F measure
+    val out = reliefSelected.map { case F(feat, rel) => (feat + 1) + "\t" + "%.4f".format(rel) }.mkString("\n")
+    
+    
+    val mRMRmodel = fitMRMR(inputData)
+    val mrmrAcc = evaluateClsPerformance(inputData, mRMRmodel)
+    val relAcc = evaluateClsPerformance(inputData, reliefModel)   
+
+    println("Train accuracy for mRMR = " + mrmrAcc)
+    println("Selected by mRMR: " + mRMRmodel.selectedFeatures.map(_ + 1).mkString(","))
+    println("Train accuracy for Relief = " + relAcc)
     println("\n*** RELIEF + Collisions selected features ***\nFeature\tScore\n" + out)
+    println("Old RELIEF selected: " + normalizedRelief.sortBy(_._2).slice(0,nselect).mkString("\n"))
+  }
+  
+  def evaluateClsPerformance(df: DataFrame, fsmodel: InfoThSelectorModel) = {
+    val reducedData = fsmodel.transform(df)
+    println("schema: " + reducedData.schema)
+    // Train a NaiveBayes model.
+    val model = new NaiveBayes()
+      .setFeaturesCol("selectedFeatures")
+      .setLabelCol(clsLabel)
+      
+    // Select example rows to display.
+    val predictions = model.fit(reducedData).transform(reducedData)
+    predictions.show()
     
-    println("\n*** RELIEF selected features: " + normalizedRelief.sortBy(_._2 * order).slice(0, 50).mkString("\n"))
-    
+    // Select (prediction, true label) and compute test error
+    val evaluator = new MulticlassClassificationEvaluator()
+      .setLabelCol(clsLabel)
+      .setPredictionCol("prediction")
+      .setMetricName("accuracy")
+    evaluator.evaluate(predictions)
   }
   
   def selectFeatures(nfeatures: Int, reliefRanking: Array[(Int, Float)],
@@ -388,11 +316,8 @@ object MainMLlibTest {
         moreFeat = false
       }
     }
-    selected.reverse
-    
+    selected.reverse  
   }
-  
-  
   
   def preProcess(df: DataFrame) = {
     val other = if(classLastIndex) df.columns.dropRight(1) else df.columns.drop(1)
@@ -463,24 +388,16 @@ object MainMLlibTest {
     }
   }
   
-  def fitMRMR(rdd: RDD[Row], schema: StructType) = {
-  // Return results
-    val inputData = sqlContext.createDataFrame(rdd, schema).cache()
-    val cls = if(classLastIndex) inputData.columns.last else inputData.columns.head
-    println("Columns class: " + cls)
-    
-    //println("inputData: " + inputData.first.toString())
-    println("schema: " + schema.toString())
-    
+  def fitMRMR(df: DataFrame) = {
     val selector = new InfoThSelector()
         .setSelectCriterion("mrmr")
         .setNPartitions(nPartitions)
-        .setNumTopFeatures(nTop)
+        .setNumTopFeatures(nselect)
         .setFeaturesCol(inputLabel) // this must be a feature vector
         .setLabelCol(clsLabel)
         .setOutputCol("selectedFeatures")
         
-    selector.fit(inputData)
+    selector.fit(df)
   }
   
   def compareRedundancies(model: InfoThSelectorModel, 
@@ -553,6 +470,114 @@ object MainMLlibTest {
           case None => println("That didn't work.")
         }
     }
+  }
+  
+  def doComparison() {
+    val rawDF = TestHelper.readCSVData(sqlContext, pathFile, firstHeader)
+    val df = preProcess(rawDF).select(clsLabel, inputLabel)
+    val allVectorsDense = true
+ 
+    df.show
+    println("df: " + df.first().toString())
+    
+    val origRDD = initRDD(df, allVectorsDense)
+    val rdd = origRDD.map {
+      case Row(label: Double, features: Vector) =>
+        LabeledPoint(label, features)
+    }.repartition(nPartitions).cache //zipwithUniqueIndexs
+    println("rdd: " + rdd.first().toString())
+    
+    //Dataframe version
+    val inputData = sqlContext.createDataFrame(origRDD, df.schema).cache()
+    println("Schema: " + df.schema)
+    
+    //val elements = rdd.collect
+    val nf = rdd.first.features.size + 1
+    //val belems = rdd.context.broadcast(elements)
+    
+    val accMarginal = new VectorAccumulator(nf)
+    // Then, register it into spark context:
+    rdd.context.register(accMarginal, "marginal")
+    val accJoint = new MatrixAccumulator(nf, nf)
+    rdd.context.register(accJoint, "joint")
+    val accConditional = new MatrixAccumulator(nf, nf)
+    rdd.context.register(accConditional, "conditional")
+    val total = rdd.context.longAccumulator("total")
+    println("# instances: " + rdd.count)
+    println("# partitions: " + rdd.partitions.size)
+    
+    rdd.foreachPartition { it =>
+        
+        val marginal = breeze.linalg.DenseVector.zeros[Long](nf)
+        val last = marginal.size - 1
+        val joint = breeze.linalg.DenseMatrix.zeros[Long](nf, nf)
+        val condjoint = breeze.linalg.DenseMatrix.zeros[Long](nf, nf)
+        //val others = belems.value
+        val elements = it.toArray
+        (0 until elements.size).map{ id1 =>
+        //while(it.hasNext){
+          //val (e1, id1) = it.next
+          val e1 = elements(id1)
+          //others.foreach{ case (e2, id2) => 
+          (id1 + 1 until elements.size).map{ id2 => 
+            val e2 = elements(id2)
+            //if(id1 > id2) {
+            if(true) {
+                var set = new TreeSet[Int]()
+                val clshit = e1.label == e2.label
+                e1.features.foreachActive{ (index, value) =>
+                   if(e1.features(index) == e2.features(index)){
+                       marginal(index) += 1
+                       set += index
+                   }            
+                }
+                
+                // Count matches in output feature
+                if(clshit){          
+                  marginal(last) += 1
+                  set += last
+                }
+                
+                // Generate combinations and update joint collisions counter
+                val arr = set.toArray
+                (0 until arr.size).map{f1 => 
+                  (f1 + 1 until arr.size).map{ f2 =>
+                    joint(arr(f1), arr(f2)) += 1
+                    if(clshit)
+                      condjoint(arr(f1), arr(f2)) += 1
+                  }         
+                }
+              total.add(1L)
+            }            
+        }
+      }
+        
+      accMarginal.add(marginal)
+      accJoint.add(joint)
+      accConditional.add(condjoint)
+    }
+  
+    val marginal = accMarginal.value.mapValues(_.toFloat) 
+    marginal :/= total.value.toFloat 
+    val joint = accJoint.value.toDenseMatrix.mapValues(_.toFloat)
+    joint :/= total.value.toFloat 
+    val conditional = accConditional.value.toDenseMatrix.mapValues(_.toFloat)
+    conditional :/= total.value.toFloat    
+    
+    // Compute mutual information using collisions with and without class
+    val redundancyMatrix = breeze.linalg.DenseMatrix.zeros[Float](nf, nf)
+    joint.activeIterator.foreach { case((i1,i2), value) =>
+      if(i1 < i2 && i1 != nf - 1 && i2 != nf - 1){
+        val red = value * log2(value / (marginal(i1) * marginal(i2))).toFloat        
+        
+        redundancyMatrix(i1, i2) = red
+        redundancyMatrix(i2, i1) = red        
+      }
+        
+    }
+    
+    val model = fitMRMR(inputData)
+    compareRedundancies(model, redundancyMatrix, order) 
   }
   
   def log2(x: Float) = { math.log(x) / math.log(2) }
