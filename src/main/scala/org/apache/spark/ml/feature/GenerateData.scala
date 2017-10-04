@@ -12,7 +12,6 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql.types.DoubleType
 import org.apache.spark.ml.Pipeline
 import breeze.linalg.functions.euclideanDistance
-import com.github.karlhigley.spark.neighbors.util.BoundedPriorityQueue
 import breeze.stats.MeanAndVariance
 import breeze.stats.DescriptiveStats
 import breeze.linalg.mapValues

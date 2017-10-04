@@ -12,7 +12,6 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql.types.DoubleType
 import org.apache.spark.ml.Pipeline
 import breeze.linalg.functions.euclideanDistance
-import com.github.karlhigley.spark.neighbors.util.BoundedPriorityQueue
 import breeze.stats.MeanAndVariance
 import breeze.stats.DescriptiveStats
 import breeze.linalg.mapValues
@@ -21,6 +20,15 @@ import org.apache.spark.mllib.feature.InfoThCriterion
 import org.apache.spark.mllib.feature.InfoThCriterionFactory
 import org.apache.spark.ml.classification.NaiveBayes
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
+import org.apache.spark.ml.tuning.CrossValidator
+import org.apache.spark.ml.tuning.ParamGridBuilder
+import org.apache.spark.mllib.util.MLUtils
+import org.apache.spark.ml.Model
+import org.apache.spark.ml.Estimator
+import org.apache.spark.ml.classification.ClassificationModel
+import org.apache.spark.ml.classification.DecisionTreeClassifier
+import org.apache.spark.ml.classification.MultilayerPerceptronClassifier
+import org.apache.spark.ml.classification.LogisticRegression
 
 
 /**
@@ -43,6 +51,7 @@ object MainMLlibTest {
   var k: Int = 5
   var categorical: Boolean = false
   var nselect: Int = 10
+  var seed = 12345678L
   
   
   // Case class for criteria/feature
@@ -143,38 +152,41 @@ object MainMLlibTest {
           (0 until elements.size).map{ id2 => 
             
             if(neighDist(id2, id1) < 0){
-              // Compute collisions and distance
-              val e2 = elements(id2)              
-              var collisioned = ArrayBuffer[Int]()
-              val clshit = e1.label == e2.label
-              e1.features.foreachActive{ (index, value) =>
-                 val dist = if(norminal){
-                   if (value != e2.features(index)) 1 else 0
-                 }  else {
-                   math.pow(value - e2.features(index), 2) 
-                 }
-                 if(dist == 0){
-                     marginal(index) += 1
-                     collisioned += index
-                 }
-                 neighDist(id1, id2) += dist
+              if(id1 != id2) {
+                // Compute collisions and distance
+                val e2 = elements(id2)              
+                var collisioned = ArrayBuffer[Int]()
+                val clshit = e1.label == e2.label
+                neighDist(id1, id2) = 0 // Init the distance counter
+                e1.features.foreachActive{ (index, value) =>
+                   val dist = if(norminal){
+                     if (value != e2.features(index)) 1 else 0
+                   }  else {
+                     math.pow(value - e2.features(index), 2) 
+                   }
+                   if(dist == 0){
+                       marginal(index) += 1
+                       collisioned += index
+                   }
+                   neighDist(id1, id2) += dist
+                }
+                neighDist(id1, id2) = math.sqrt(neighDist(id1, id2))  
+                topk(elements(id2).label.toInt) += neighDist(id1, id2) -> id2
+                
+                // Count matches in output feature
+                if(clshit){          
+                  marginal(last) += 1
+                  collisioned += last
+                }
+                
+                // Generate combinations and update joint collisions counter
+                (0 until collisioned.size).map{f1 => 
+                  (f1 + 1 until collisioned.size).map{ f2 =>
+                    joint(collisioned(f1), collisioned(f2)) += 1
+                  }         
+                }
+                total.add(1L) // use to compute likelihoods (denom)
               }
-              neighDist(id1, id2) = math.sqrt(neighDist(id1, id2))  
-              topk(elements(id2).label.toInt) += neighDist(id1, id2) -> id2
-              
-              // Count matches in output feature
-              if(clshit){          
-                marginal(last) += 1
-                collisioned += last
-              }
-              
-              // Generate combinations and update joint collisions counter
-              (0 until collisioned.size).map{f1 => 
-                (f1 + 1 until collisioned.size).map{ f2 =>
-                  joint(collisioned(f1), collisioned(f2)) += 1
-                }         
-              }
-              total.add(1L) // use to compute likelihoods (denom)
             } else {
               topk(elements(id2).label.toInt) += neighDist(id2, id1) -> id2              
             }                      
@@ -228,26 +240,53 @@ object MainMLlibTest {
     import breeze.stats._ 
     val stats = meanAndVariance(redundancyMatrix)
     val normRedundancyMatrix = redundancyMatrix.mapValues{ value => ((value - stats.mean) / stats.stdDev).toFloat }    
-    val reliefSelected = selectFeatures(nf, normalizedRelief, normRedundancyMatrix)    
+    val (reliefColl, relief) = selectFeatures(nf, normalizedRelief, normRedundancyMatrix)    
+    val reliefCollModel = new InfoThSelectorModel("", new org.apache.spark.mllib.feature.InfoThSelectorModel(
+        selectedFeatures = reliefColl.map { case F(feat, rel) => feat }.sorted.toArray))
+          .setOutputCol("selectedFeatures")
+          .setFeaturesCol(inputLabel) // this must be a feature vector
+          .setLabelCol(clsLabel)
+          
     val reliefModel = new InfoThSelectorModel("", new org.apache.spark.mllib.feature.InfoThSelectorModel(
-        selectedFeatures = reliefSelected.map { case F(feat, rel) => feat }.sorted.toArray))
+        selectedFeatures = relief.map { case F(feat, rel) => feat }.sorted.toArray))
           .setOutputCol("selectedFeatures")
           .setFeaturesCol(inputLabel) // this must be a feature vector
           .setLabelCol(clsLabel)
     
     // Print best features according to the RELIEF-F measure
-    val out = reliefSelected.map { case F(feat, rel) => (feat + 1) + "\t" + "%.4f".format(rel) }.mkString("\n")
-    
-    
+    val outRC = reliefColl.map { case F(feat, rel) => (feat + 1) + "\t" + "%.4f".format(rel) }.mkString("\n")
+    val outR = relief.map { case F(feat, rel) => (feat + 1) + "\t" + "%.4f".format(rel) }.mkString("\n")
     val mRMRmodel = fitMRMR(inputData)
-    val mrmrAcc = evaluateClsPerformance(inputData, mRMRmodel)
-    val relAcc = evaluateClsPerformance(inputData, reliefModel)   
 
-    println("Train accuracy for mRMR = " + mrmrAcc)
-    println("Selected by mRMR: " + mRMRmodel.selectedFeatures.map(_ + 1).mkString(","))
-    println("Train accuracy for Relief = " + relAcc)
-    println("\n*** RELIEF + Collisions selected features ***\nFeature\tScore\n" + out)
-    println("Old RELIEF selected: " + normalizedRelief.sortBy(_._2).slice(0,nselect).mkString("\n"))
+    val mrmrAcc = kCVPerformance(inputData, mRMRmodel, "nb")
+    val relCAcc = kCVPerformance(inputData, reliefCollModel, "nb")   
+    val relAcc = kCVPerformance(inputData, reliefModel, "nb")   
+    val acc = kCVPerformance(inputData, null, "nb")   
+    val mrmrAccDT = kCVPerformance(inputData, mRMRmodel, "dt")
+    val relCAccDT = kCVPerformance(inputData, reliefCollModel, "dt")   
+    val relAccDT = kCVPerformance(inputData, reliefModel, "dt")   
+    val accDT = kCVPerformance(inputData, null, "dt")   
+    val mrmrAccLR = kCVPerformance(inputData, mRMRmodel, "lr")
+    val relCAccLR = kCVPerformance(inputData, reliefCollModel, "lr") 
+    val relAccLR = kCVPerformance(inputData, reliefModel, "lr") 
+    val accLR = kCVPerformance(inputData, null, "lr")
+
+    println("Train accuracy for mRMR (Naive Bayes) = " + mrmrAcc)
+    println("Train accuracy for Relief (Naive Bayes) = " + relAcc)
+    println("Train accuracy for ReliefColl (Naive Bayes) = " + relCAcc)
+    println("Baseline train accuracy (Naive Bayes) = " + acc)
+    println("Train accuracy for mRMR (Decision Tree) = " + mrmrAccDT)
+    println("Train accuracy for ReliefColl (Decision Tree) = " + relCAccDT)
+    println("Train accuracy for Relief (Decision Tree) = " + relAccDT)
+    println("Baseline train accuracy (Decision Tree) = " + accDT)
+    println("Train accuracy for mRMR (LR) = " + mrmrAccLR)
+    println("Train accuracy for ReliefColl (LR) = " + relCAccLR)
+    println("Train accuracy for Relief (LR) = " + relAccLR)
+    println("Baseline train accuracy (LR) = " + accLR)
+    
+    println("\n*** Selected by mRMR: " + mRMRmodel.selectedFeatures.map(_ + 1).mkString(","))
+    println("\n*** RELIEF + Collisions selected features ***\nFeature\tScore\n" + outRC)
+    println("\n*** RELIEF selected features ***\nFeature\tScore\n" + outR)
   }
   
   def evaluateClsPerformance(df: DataFrame, fsmodel: InfoThSelectorModel) = {
@@ -268,6 +307,76 @@ object MainMLlibTest {
       .setPredictionCol("prediction")
       .setMetricName("accuracy")
     evaluator.evaluate(predictions)
+  }
+  
+  def kCVPerformance(df: DataFrame, fsmodel: InfoThSelectorModel, classifier: String) = {
+    
+    var inputCol = "selectedFeatures"
+    var labelCol = clsLabel
+    val reducedData = if(fsmodel != null) {
+      fsmodel.transform(df)
+    } else {
+      inputCol = "features"
+      df
+    }
+    println("Reduced schema: " + reducedData.schema)
+    val splits = MLUtils.kFold(reducedData.rdd, 10, seed)
+    val sql = df.sqlContext
+        
+    val estimator = if(classifier == "nb") {
+       new NaiveBayes()
+        .setFeaturesCol(inputCol)
+        .setLabelCol(clsLabel)    
+     
+    } else if(classifier == "dt") {
+      val labelIndexer = new StringIndexer()
+          .setInputCol(labelCol)
+          .setOutputCol("indexedLabel")
+          .fit(reducedData)
+      labelCol = "indexedLabel"    
+      // Automatically identify categorical features, and index them.
+      val featureIndexer = new VectorIndexer()
+        .setInputCol(inputCol)
+        .setOutputCol("indexedFeatures")
+        .setMaxCategories(15) // features with > 4 distinct values are treated as continuous.
+        .fit(reducedData)
+        
+      inputCol = "indexedFeatures"
+      
+      val dt = new DecisionTreeClassifier()
+        .setFeaturesCol(inputCol)
+        .setLabelCol(labelCol)  
+        
+      // Convert indexed labels back to original labels.
+      val labelConverter = new IndexToString()
+        .setInputCol("prediction")
+        .setOutputCol("predictedLabel")
+        .setLabels(labelIndexer.labels)
+        
+      new Pipeline().setStages(Array(labelIndexer, featureIndexer, dt, labelConverter))
+
+    } else {
+      new LogisticRegression()
+        .setFeaturesCol(inputCol)
+        .setLabelCol(labelCol) 
+    }
+    
+    val evaluator = new MulticlassClassificationEvaluator()
+        .setLabelCol(labelCol)
+        .setPredictionCol("prediction")
+        .setMetricName("accuracy")
+        
+    //K-folding operation starting
+    //for each fold you have multiple models created cfm. the paramgrid
+    val sum = splits.zipWithIndex.map { case ((training, validation), _) =>
+      val trainingDataset = sql.createDataFrame(training, reducedData.schema).cache()
+      val validationDataset = sql.createDataFrame(validation, reducedData.schema).cache()
+
+      val model = estimator.fit(trainingDataset)
+      trainingDataset.unpersist()
+      evaluator.evaluate(model.transform(validationDataset))
+    }.sum
+    sum.toFloat / splits.size
   }
   
   def selectFeatures(nfeatures: Int, reliefRanking: Array[(Int, Float)],
@@ -316,7 +425,8 @@ object MainMLlibTest {
         moreFeat = false
       }
     }
-    selected.reverse  
+    val reliefNoColl = reliefRanking.sortBy(-_._2).slice(0, nselect).map{ case(id, score) => F(id,score)}.toSeq
+    (selected.reverse, reliefNoColl)  
   }
   
   def preProcess(df: DataFrame) = {

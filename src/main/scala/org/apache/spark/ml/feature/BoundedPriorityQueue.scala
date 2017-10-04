@@ -1,4 +1,4 @@
-package com.github.karlhigley.spark.neighbors.util
+package org.apache.spark.ml.feature
 
 import java.io.Serializable
 import java.util.{ PriorityQueue => JPriorityQueue }
