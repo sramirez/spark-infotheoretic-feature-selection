@@ -52,8 +52,12 @@ Design doc: https://docs.google.com/document/d/1HOaPL_HJzTbL2tVdzbTjhr5wxVvPe9e-
 
 ## Prerequisites:
 
-LabeledPoint data must be discretized as integer values in double representation with a maximum of 256 distinct values. 
-By doing so, data can be transformed to byte type directly, making the selection process much more efficient.
+LabeledPoint data must be discretized as integer values in double representation, ranging from 0 to 255. 
+By doing so, double values can be transformed to byte directly thus making the overall selection process much more efficient (communication overhead is deeply reduced).
+
+Please refer to the MDLP package if you need to discretize your dataset: 
+
+https://spark-packages.org/package/sramirez/spark-MDLP-discretization
 
 ## Contributors
 
