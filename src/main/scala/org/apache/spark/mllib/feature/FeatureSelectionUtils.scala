@@ -17,10 +17,10 @@
 
 package org.apache.spark.mllib.feature
 
-import scala.collection.mutable.ArrayBuilder
-
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.mllib.linalg._
+
+import scala.collection.mutable
 
 /**
  * Feature utils object for selector methods.
@@ -40,8 +40,8 @@ object FeatureSelectionUtils {
     features match {
       case v: SparseVector =>
         val newSize = filterIndices.length
-        val newValues = new ArrayBuilder.ofDouble
-        val newIndices = new ArrayBuilder.ofInt
+        val newValues = new mutable.ArrayBuilder.ofDouble
+        val newIndices = new mutable.ArrayBuilder.ofInt
         var i = 0
         var j = 0
         var indicesIdx = 0

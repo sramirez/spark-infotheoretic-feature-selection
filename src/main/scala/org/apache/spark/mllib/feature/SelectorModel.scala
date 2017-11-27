@@ -18,10 +18,7 @@
 package org.apache.spark.mllib.feature
 
 import org.apache.spark.annotation.Experimental
-import org.apache.spark.mllib.linalg.{ Vector, Vectors }
-import org.apache.spark.mllib.regression.LabeledPoint
-import org.apache.spark.mllib.stat.Statistics
-import org.apache.spark.rdd.RDD
+import org.apache.spark.mllib.linalg.Vector
 
 /**
  * :: Experimental ::

@@ -46,7 +46,7 @@ trait InfoThCriterion extends Serializable with Ordered[InfoThCriterion] {
   /**
    *  Compares the score of two criterions
    */
-  override def compare(that: InfoThCriterion) = {
+  override def compare(that: InfoThCriterion): Int = {
     this.score.compare(that.score)
   }
 
@@ -75,7 +75,7 @@ trait InfoThCriterion extends Serializable with Ordered[InfoThCriterion] {
  */
 class Mim extends InfoThCriterion {
 
-  override def score = relevance
+  override def score: Float = relevance
 
   override def init(relevance: Float): InfoThCriterion = {
     this.setRelevance(relevance)
@@ -92,7 +92,7 @@ class Mifs(val beta: Float = 0.0f) extends InfoThCriterion {
 
   var redundance: Float = 0.0f
 
-  override def score = relevance - redundance * beta
+  override def score: Float = relevance - redundance * beta
 
   override def init(relevance: Float): InfoThCriterion = {
     this.setRelevance(relevance)
@@ -115,7 +115,7 @@ class Jmi extends InfoThCriterion {
   var conditionalRedundance: Float = 0.0f
   var selectedSize: Int = 0
 
-  override def score = {
+  override def score: Float = {
     if (selectedSize != 0) {
       relevance - redundance / selectedSize + conditionalRedundance / selectedSize
     } else {
@@ -142,7 +142,7 @@ class Mrmr extends InfoThCriterion {
   var redundance: Float = 0.0f
   var selectedSize: Int = 0
 
-  override def score = {
+  override def score: Float = {
     if (selectedSize != 0) {
       relevance - redundance / selectedSize
     } else {

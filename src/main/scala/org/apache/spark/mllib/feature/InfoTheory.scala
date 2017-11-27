@@ -18,9 +18,7 @@
 package org.apache.spark.mllib.feature
 
 import breeze.linalg._
-import breeze.linalg._
-import breeze.numerics._
-import breeze.linalg.{ DenseVector => BDV, SparseVector => BSV, Vector => BV, DenseMatrix => BDM }
+import breeze.linalg.{ DenseVector => BDV, Vector => BV, DenseMatrix => BDM }
 import scala.collection.mutable
 import org.apache.spark.rdd.RDD
 import org.apache.spark.broadcast.Broadcast
@@ -47,14 +45,14 @@ class InfoTheory extends Serializable {
    * @param data RDD of tuples (feature, 2-dim histogram).
    * @param yProb Vector of proportions for the secondary feature.
    * @param nInstances Number of instances.
-   * @result A RDD of tuples (feature, MI).
+   * @return A RDD of tuples (feature, MI).
    *
    */
   protected def computeMutualInfo(
     data: RDD[(Int, BDM[Long])],
     yProb: BDV[Float],
     nInstances: Long
-  ) = {
+  ): RDD[(Int, Float)] = {
 
     val byProb = data.context.broadcast(yProb)
     val result = data.mapValues({ m =>
@@ -85,7 +83,7 @@ class InfoTheory extends Serializable {
    * @param marginalProb RDD of tuples (feature, marginal vector)
    * @param jointProb RDD of tuples (feature, joint matrices)
    * @param n Number of instances.
-   * @result A RDD of tuples (feature, CMI).
+   * @return A RDD of tuples (feature, CMI).
    *
    */
   protected def computeConditionalMutualInfo(
@@ -95,12 +93,12 @@ class InfoTheory extends Serializable {
     marginalProb: RDD[(Int, BDV[Float])],
     jointProb: RDD[(Int, BDM[Float])],
     n: Long
-  ) = {
+  ): RDD[(Int, (Float, Float))] = {
 
     val sc = data.context
-    val yProb = sc.broadcast(marginalProb.lookup(varY)(0))
-    val zProb = sc.broadcast(marginalProb.lookup(varZ)(0))
-    val yzProb = sc.broadcast(jointProb.lookup(varY)(0))
+    val yProb = sc.broadcast(marginalProb.lookup(varY).head)
+    val zProb = sc.broadcast(marginalProb.lookup(varZ).head)
+    val yzProb = sc.broadcast(jointProb.lookup(varY).head)
 
     val result = data.mapValues({ m =>
       var cmi = 0.0d; var mi = 0.0d
@@ -159,9 +157,9 @@ class InfoTheorySparse(
 ) extends InfoTheory with Serializable {
 
   // Broadcast the class attribute (fixed)
-  val fixedVal = data.lookup(fixedFeat)(0)
-  val fixedCol = (fixedFeat, data.context.broadcast(fixedVal))
-  val fixedColHistogram = computeFrequency(fixedCol._2.value, nInstances)
+  val fixedVal: BV[Byte] = data.lookup(fixedFeat).head
+  val fixedCol: (Int, Broadcast[BV[Byte]]) = (fixedFeat, data.context.broadcast(fixedVal))
+  val fixedColHistogram: Map[Byte, Long] = computeFrequency(fixedCol._2.value, nInstances)
 
   // Compute and cache the relevance values, and the marginal and joint proportions
   val (marginalProb, jointProb, relevances) = {
@@ -179,7 +177,7 @@ class InfoTheorySparse(
     // Remove the class attribute from the computations
     val label = nFeatures - 1
     val fdata = histograms.filter { case (k, _) => k != label }
-    val marginalY = marginalTable.lookup(fixedFeat)(0)
+    val marginalY = marginalTable.lookup(fixedFeat).head
 
     // Compute MI between all input features and the class (relevances)
     val relevances = computeMutualInfo(fdata, marginalY, nInstances).cache()
@@ -188,27 +186,27 @@ class InfoTheorySparse(
 
   private def computeFrequency(data: BV[Byte], nInstances: Long) = {
     val tmp = data.activeValuesIterator.toArray
-      .groupBy(l => l).map(t => (t._1, t._2.size.toLong))
+      .groupBy(l => l).map(t => (t._1, t._2.length.toLong))
     val lastElem = (0: Byte, nInstances - tmp.filter({ case (v, _) => v != 0 }).values.sum)
     tmp + lastElem
   }
 
-  def getRelevances(varY: Int) = relevances
+  def getRelevances(varY: Int): RDD[(Int, Float)] = relevances
 
   /**
    * Computes simple and conditional redundancy for all input attributes with respect to
    * a secondary variable (Y) and a conditional variable (already cached).
    *
    * @param varY Index of the secondary feature (class).
-   * @result A RDD of tuples (feature, (redundancy, conditional redundancy)).
+   * @return A RDD of tuples (feature, (redundancy, conditional redundancy)).
    *
    */
   def getRedundancies(
     varY: Int
-  ) = {
+  ): RDD[(Int, (Float, Float))] = {
 
     // Get and broadcast Y and the fixed variable
-    val ycol = data.lookup(varY)(0)
+    val ycol = data.lookup(varY).head
     val (varZ, zcol) = fixedCol
 
     // Compute conditional histograms for all variables with respect to Y and the fixed variable
@@ -226,11 +224,11 @@ class InfoTheorySparse(
    * Computes 2-dim histograms for all input attributes with respect to
    * a secondary variable (class).
    *
-   * @param RDD of tuples (feature, values)
+   * @param filterData RDD of tuples (feature, values)
    * @param ycol (feature, values).
    * @param yhist Histogram for variable Y (class).
    *
-   * @result A RDD of tuples (feature, histogram).
+   * @return A RDD of tuples (feature, histogram).
    *
    */
   private def computeHistograms(
@@ -268,7 +266,7 @@ class InfoTheorySparse(
    * @param filterData RDD of tuples (feature, values)
    * @param ycol (feature, value vector).
    *
-   * @result A RDD of tuples (feature, histogram).
+   * @return A RDD of tuples (feature, histogram).
    *
    */
   private def computeConditionalHistograms(
@@ -316,7 +314,7 @@ class InfoTheorySparse(
         yzhist.foreach({ case ((y, z), q) => result(z)(0, y) += q })
 
         // Computations for Z elements with X and Y equal to zero
-        bzhist.map({
+        bzhist.foreach({
           case (zval, _) =>
             val rest = bzhist(zval) - sum(result(zval))
             result(zval)(0, 0) += rest
@@ -353,7 +351,7 @@ class InfoTheoryDense(
 ) extends InfoTheory with Serializable {
 
   // Count the number of distinct values per feature to limit the size of matrices
-  val counterByFeat = {
+  val counterByFeat: Broadcast[Map[Int, Int]] = {
     val counter = data.map {
       case (k, v) =>
         val max = if (!v.isEmpty) v.max + 1 else 1
@@ -365,7 +363,7 @@ class InfoTheoryDense(
   }
 
   // Broadcast fixed attribute
-  val fixedCol = {
+  val fixedCol: (Int, Broadcast[Array[Array[Byte]]]) = {
     val min = fixedFeat * originalNPart
     val yvals = data.filterByRange(min, min + originalNPart - 1).collect()
     val ycol = Array.ofDim[Array[Byte]](yvals.length)
@@ -385,22 +383,22 @@ class InfoTheoryDense(
 
     // Remove output feature from the computations and compute MI with respect to the fixed var
     val fdata = histograms.filter { case (k, _) => k != fixedFeat }
-    val marginalY = marginalTable.lookup(fixedFeat)(0)
+    val marginalY = marginalTable.lookup(fixedFeat).head
     val relevances = computeMutualInfo(fdata, marginalY, nInstances).cache()
     (marginalTable, jointTable, relevances)
   }
 
-  def getRelevances(varY: Int) = relevances
+  def getRelevances(varY: Int): RDD[(Int, Float)] = relevances
 
   /**
    * Computes simple and conditional redundancy for all input attributes with respect to
    * a secondary variable (Y) and a conditional variable (already cached).
    *
    * @param varY Index of the secondary feature (class).
-   * @result A RDD of tuples (feature, (redundancy, conditional redundancy)).
+   * @return A RDD of tuples (feature, (redundancy, conditional redundancy)).
    *
    */
-  def getRedundancies(varY: Int) = {
+  def getRedundancies(varY: Int): RDD[(Int, (Float, Float))] = {
 
     // Get and broadcast Y and the fixed variable (conditional)
     val min = varY * originalNPart
@@ -425,11 +423,10 @@ class InfoTheoryDense(
    * Computes 2-dim histograms for all input attributes
    * with respect to a secondary variable (class).
    *
-   * @param RDD of tuples (feature, values)
+   * @param data RDD of tuples (feature, values)
    * @param ycol (feature, values).
-   * @param yhist Histogram for variable Y (class).
    *
-   * @result A RDD of tuples (feature, histogram).
+   * @return A RDD of tuples (feature, histogram).
    *
    */
   private def computeHistograms(
@@ -439,7 +436,7 @@ class InfoTheoryDense(
 
     val maxSize = 256; val bycol = ycol._2
     val counter = counterByFeat
-    val ys = counter.value.getOrElse(ycol._1, maxSize).toInt
+    val ys = counter.value.getOrElse(ycol._1, maxSize)
 
     data.mapPartitions({ it =>
       var result = Map.empty[Int, BDM[Long]]
@@ -449,9 +446,9 @@ class InfoTheoryDense(
         val block = index % originalNPart
         val m = result.getOrElse(
           feat,
-          BDM.zeros[Long](counter.value.getOrElse(feat, maxSize).toInt, ys)
+          BDM.zeros[Long](counter.value.getOrElse(feat, maxSize), ys)
         )
-        for (i <- 0 until arr.length)
+        for (i <- arr.indices)
           m(arr(i), bycol.value(block)(i)) += 1
         result += feat -> m
       }
@@ -464,17 +461,18 @@ class InfoTheoryDense(
    * a secondary variable and the conditional variable. Conditional feature
    * (class) must be already cached.
    *
-   * @param filterData RDD of tuples (feature, values)
+   * @param data RDD of tuples (feature, values)
    * @param ycol (feature, value vector).
+   * @param zcol
    *
-   * @result A RDD of tuples (feature, histogram).
+   * @return A RDD of tuples (feature, histogram).
    *
    */
   private def computeConditionalHistograms(
     data: RDD[(Int, Array[Byte])],
     ycol: (Int, Array[Array[Byte]]),
     zcol: (Int, Broadcast[Array[Array[Byte]]])
-  ) = {
+  ): RDD[(Int, BDV[BDM[Long]])] = {
 
     val bycol = data.context.broadcast(ycol._2)
     val bzcol = zcol._2
@@ -493,7 +491,7 @@ class InfoTheoryDense(
           feat,
           BDV.fill[BDM[Long]](zs) { BDM.zeros[Long](bcounter.value.getOrElse(feat, 256), ys) }
         )
-        for (i <- 0 until arr.length) {
+        for (i <- arr.indices) {
           val y = bycol.value(block)(i)
           val z = bzcol.value(block)(i)
           m(z)(arr(i), y) += 1
@@ -528,7 +526,7 @@ object InfoTheory {
     fixedFeat: Int,
     nInstances: Long,
     nFeatures: Int
-  ) = {
+  ): InfoTheorySparse = {
     new InfoTheorySparse(data, fixedFeat, nInstances, nFeatures)
   }
 
@@ -550,7 +548,7 @@ object InfoTheory {
     nInstances: Long,
     nFeatures: Int,
     originalNPart: Int
-  ) = {
+  ): InfoTheoryDense = {
     new InfoTheoryDense(data, fixedFeat, nInstances, nFeatures, originalNPart)
   }
 
@@ -576,7 +574,7 @@ object InfoTheory {
    * @param freqs Frequencies of each different class
    */
   private[feature] def entropy(freqs: Seq[Long]): Double = {
-    entropy(freqs, freqs.reduce(_ + _))
+    entropy(freqs, freqs.sum)
   }
 
 }
