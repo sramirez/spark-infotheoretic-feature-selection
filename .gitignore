@@ -1,0 +1,11 @@
+# scala
+target
+*.class
+*.log
+
+# intellij
+*.iml
+*.ipr
+*.iws
+.idea
+out
