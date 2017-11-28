@@ -17,29 +17,26 @@
 
 package org.apache.spark.mllib.feature
 
-import scala.collection.mutable.ArrayBuilder
-
 import org.json4s._
 import org.json4s.JsonDSL._
 import org.json4s.jackson.JsonMethods._
-
-import breeze.linalg.{ DenseVector => BDV, SparseVector => BSV, Vector => BV, DenseMatrix => BDM }
-import org.apache.spark.annotation.{ Since, Experimental }
-import org.apache.spark.mllib.feature.{ InfoThCriterionFactory => FT }
-import org.apache.spark.mllib.feature.{ InfoTheory => IT }
+import breeze.linalg.{DenseVector => BDV, SparseVector => BSV, Vector => BV}
+import org.apache.spark.annotation.Since
+import org.apache.spark.mllib.feature.{InfoThCriterionFactory => FT}
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.linalg.{ Vector, DenseVector, SparseVector }
-import org.apache.spark.mllib.stat.Statistics
-import org.apache.spark.mllib.util.{ Loader, Saveable }
+import org.apache.spark.mllib.linalg.{DenseVector, SparseVector, Vector}
+import org.apache.spark.mllib.util.{Loader, Saveable}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.HashPartitioner
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkException
-import org.apache.spark.sql.{ Row, SparkSession }
+import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.Partitioner
 import org.apache.spark.internal.Logging
+
+import scala.collection.mutable
 
 /**
  * Information Theoretic Selector model.
@@ -85,8 +82,8 @@ class InfoThSelectorModel @Since("1.6.0") (
     features match {
       case SparseVector(size, indices, values) =>
         val newSize = filterIndices.length
-        val newValues = new ArrayBuilder.ofDouble
-        val newIndices = new ArrayBuilder.ofInt
+        val newValues = new mutable.ArrayBuilder.ofDouble
+        val newIndices = new mutable.ArrayBuilder.ofInt
         var i = 0
         var j = 0
         var indicesIdx = 0
@@ -159,7 +156,7 @@ object InfoThSelectorModel extends Loader[InfoThSelectorModel] {
     }
 
     def load(sc: SparkContext, path: String): InfoThSelectorModel = {
-      implicit val formats = DefaultFormats
+      implicit val formats: DefaultFormats.type = DefaultFormats
       val spark = SparkSession.builder().sparkContext(sc).getOrCreate()
       val (className, formatVersion, metadata) = Loader.loadMetadata(sc, path)
       assert(className == thisClassName)
@@ -172,10 +169,10 @@ object InfoThSelectorModel extends Loader[InfoThSelectorModel] {
       Loader.checkSchema[Data](dataFrame.schema)
 
       val features = dataArray.rdd.map {
-        case Row(feature: Int) => (feature)
+        case Row(feature: Int) => feature
       }.collect()
 
-      return new InfoThSelectorModel(features)
+      new InfoThSelectorModel(features)
     }
   }
 }
@@ -252,7 +249,7 @@ class InfoThSelector @Since("1.6.0") (
     }
 
     // Print most relevant features
-    val topByRelevance = relevances.sortBy(_._2, false).take(nToSelect)
+    val topByRelevance = relevances.sortBy(_._2, ascending = false).take(nToSelect)
     val strRels = topByRelevance.map({ case (f, mi) => (f + 1) + "\t" + "%.4f" format mi })
       .mkString("\n")
     println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels)
@@ -335,7 +332,7 @@ class InfoThSelector @Since("1.6.0") (
     // Start the transformation to the columnar format
     val colData = if (dense) {
 
-      val originalNPart = data.partitions.size
+      val originalNPart = data.partitions.length
       val classMap = data.map(_.label).distinct.collect()
         .zipWithIndex.map(t => t._1 -> t._2.toByte)
         .toMap
@@ -355,7 +352,7 @@ class InfoThSelector @Since("1.6.0") (
           j += 1
         }
 
-        val chunks = for (i <- 0 until nFeatures) yield ((i * originalNPart + index) -> mat(i))
+        val chunks = for (i <- 0 until nFeatures) yield (i * originalNPart + index) -> mat(i)
         chunks.toIterator
       })
 
@@ -367,7 +364,7 @@ class InfoThSelector @Since("1.6.0") (
           + " At least, less than 2x the number of features.")
       }
       val denseData = columnarData.sortByKey(numPartitions = np).persist(StorageLevel.MEMORY_ONLY)
-      ColumnarData(denseData, null, true, originalNPart)
+      ColumnarData(denseData, null, isDense = true, originalNPart)
     } else {
 
       val np = if (numPartitions == 0) data.conf.getInt("spark.default.parallelism", 750) else numPartitions
@@ -380,7 +377,7 @@ class InfoThSelector @Since("1.6.0") (
           requireByteValues(lp.features)
           val sv = lp.features.toSparse
           val output = (nFeatures - 1) -> (r, classMap(lp.label))
-          val inputs = for (i <- 0 until sv.indices.length)
+          val inputs = for (i <- sv.indices.indices)
             yield (sv.indices(i), (r, sv.values(i).toByte))
           output +: inputs
       })
@@ -428,6 +425,6 @@ class ExactPartitioner(
 
   override def getPartition(key: Any): Int = {
     val k = key.asInstanceOf[Long]
-    return (k * partitions / elements).toInt
+    (k * partitions / elements).toInt
   }
 }
