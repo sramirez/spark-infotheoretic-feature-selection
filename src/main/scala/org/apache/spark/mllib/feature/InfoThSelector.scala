@@ -38,6 +38,9 @@ import org.apache.spark.internal.Logging
 
 import scala.collection.mutable
 
+// Case class for criteria/feature
+protected case class F(feat: Int, crit: Double)
+
 /**
  * Information Theoretic Selector model.
  *
@@ -152,7 +155,6 @@ object InfoThSelectorModel extends Loader[InfoThSelectorModel] {
         Data(model.selectedFeatures(i))
       }
       sc.parallelize(dataArray, 1).toDF().write.parquet(Loader.dataPath(path))
-
     }
 
     def load(sc: SparkContext, path: String): InfoThSelectorModel = {
@@ -202,8 +204,6 @@ class InfoThSelector @Since("1.6.0") (
 )
     extends Serializable with Logging {
 
-  // Case class for criteria/feature
-  protected case class F(feat: Int, crit: Double)
   // Case class for columnar data (dense and sparse version)
   private case class ColumnarData(
     dense: RDD[(Int, Array[Byte])],
@@ -250,9 +250,8 @@ class InfoThSelector @Since("1.6.0") (
 
     // Print most relevant features
     val topByRelevance = relevances.sortBy(_._2, ascending = false).take(nToSelect)
-    val strRels = topByRelevance.map({ case (f, mi) => (f + 1) + "\t" + "%.4f" format mi })
-      .mkString("\n")
-    println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels)
+//    val strRels = topByRelevance.map({ case (f, mi) => (f + 1) + "\t" + "%.4f" format mi }).mkString("\n")
+//    println("\n*** MaxRel features ***\nFeature\tScore\n" + strRels)
 
     // Get the maximum and initialize the set of selected features with it
     val (max, mid) = pool.zipWithIndex.maxBy(_._1.relevance)
@@ -292,13 +291,13 @@ class InfoThSelector @Since("1.6.0") (
   }
 
   /**
-   * Process in charge of transforming data in a columnar format and launching the FS process.
-   *
-   * @param data RDD of LabeledPoint.
-   * @return A feature selection model which contains a subset of selected features.
-   *
-   */
-  def fit(data: RDD[LabeledPoint]): InfoThSelectorModel = {
+    * Process in charge of transforming data in a columnar format and launching the FS process.
+    *
+    * @param data RDD of LabeledPoint.
+    * @return a Sequence of selected features (with scores)
+    *
+    */
+  def selectFeatures(data: RDD[LabeledPoint]): Seq[F] = {
 
     if (data.getStorageLevel == StorageLevel.NONE) {
       logWarning("The input data is not directly cached, which may hurt performance if its"
@@ -356,7 +355,7 @@ class InfoThSelector @Since("1.6.0") (
         chunks.toIterator
       })
 
-      // Sort to group all chunks for the same feature closely. 
+      // Sort to group all chunks for the same feature closely.
       // It will avoid to shuffle too much histograms
       val np = if (numPartitions == 0) nFeatures else numPartitions
       if (np > nFeatures) {
@@ -382,7 +381,7 @@ class InfoThSelector @Since("1.6.0") (
           output +: inputs
       })
 
-      // Transform sparse data into a columnar format 
+      // Transform sparse data into a columnar format
       // by grouping all values for the same feature in a single vector
       val columnarData = sparseData.groupByKey(new HashPartitioner(np))
         .mapValues({ a =>
@@ -404,10 +403,23 @@ class InfoThSelector @Since("1.6.0") (
     val selected = selectFeatures(colData, nInstances, nFeatures)
     if (dense) colData.dense.unpersist() else colData.sparse.unpersist()
 
+    selected
+  }
+
+  /**
+    * Process in charge of transforming data in a columnar format and launching the FS process.
+    *
+    * @param data RDD of LabeledPoint.
+    * @return A feature selection model which contains a subset of selected features.
+    *
+    */
+  def fit(data: RDD[LabeledPoint]): InfoThSelectorModel = {
+
+    val selected = selectFeatures(data)
+
     // Print best features according to the mRMR measure
     val out = selected.map {
-      case F(feat, rel) =>
-        (feat + 1) + "\t" + "%.4f".format(rel)
+      case F(feat, rel) => (feat + 1) + "\t" + "%.4f".format(rel)
     }.mkString("\n")
     println("\n*** Selected features ***\nFeature\tScore\n" + out)
     // Features must be sorted
