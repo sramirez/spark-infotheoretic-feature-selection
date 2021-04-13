@@ -124,7 +124,7 @@ class InfoThSelectorModel @Since("1.6.0") (
     InfoThSelectorModel.SaveLoadV1_0.save(sc, this, path)
   }
 
-  override protected def formatVersion: String = "1.0"
+//  override protected def formatVersion: String = "1.0"
 }
 
 object InfoThSelectorModel extends Loader[InfoThSelectorModel] {
