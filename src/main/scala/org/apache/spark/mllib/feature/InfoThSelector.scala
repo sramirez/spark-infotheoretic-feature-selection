@@ -123,8 +123,6 @@ class InfoThSelectorModel @Since("1.6.0") (
   override def save(sc: SparkContext, path: String): Unit = {
     InfoThSelectorModel.SaveLoadV1_0.save(sc, this, path)
   }
-
-  override protected def formatVersion: String = "1.0"
 }
 
 object InfoThSelectorModel extends Loader[InfoThSelectorModel] {

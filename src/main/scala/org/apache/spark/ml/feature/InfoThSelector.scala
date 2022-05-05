@@ -257,7 +257,7 @@ object InfoThSelectorModel extends MLReadable[InfoThSelectorModel] {
       val selectedFeatures = data.getAs[Seq[Int]](0).toArray
       val oldModel = new feature.InfoThSelectorModel(selectedFeatures)
       val model = new InfoThSelectorModel(metadata.uid, oldModel)
-      DefaultParamsReader.getAndSetParams(model, metadata)
+      metadata.getAndSetParams(model)
       model
     }
   }

@@ -1,6 +1,5 @@
 package org.apache.spark.ml.feature
 
-import java.sql.Timestamp
 import org.apache.log4j.{Level, LogManager}
 import org.apache.spark.sql.functions._
 import org.apache.spark.{SparkConf, SparkContext}
@@ -9,9 +8,7 @@ import org.apache.spark.sql.types._
 import org.joda.time.format.DateTimeFormat
 import org.apache.spark.ml.linalg.Vectors
 import org.apache.spark.ml.linalg.Vector
-import org.apache.spark.ml.linalg.VectorUDT
 import org.apache.spark.sql.Dataset
-import org.apache.spark.ml.util._
 
 /**
   * Loads various test datasets
@@ -31,18 +28,18 @@ object TestHelper {
   /**
     * @return the feature select fit to the data given the specified features to bin and label use as target.
     */
-  
+
   def createSelectorModel(sqlContext: SQLContext, dataframe: Dataset[_], inputCols: Array[String],
                              labelColumn: String,
                              nPartitions: Int = 100,
-                             numTopFeatures: Int = 20, 
+                             numTopFeatures: Int = 20,
                              allVectorsDense: Boolean = true,
                              padded: Int = 0 /* if minimum value is negative */): InfoThSelectorModel = {
     val featureAssembler = new VectorAssembler()
       .setInputCols(inputCols)
       .setOutputCol("features")
     val processedDf = featureAssembler.transform(dataframe).select(labelColumn + INDEX_SUFFIX, "features")
-    
+
     /** InfoSelector requires all vectors from the same type (either be sparse or dense) **/
     val rddData = processedDf.rdd.map {
         case Row(label: Double, features: Vector) =>
@@ -53,12 +50,12 @@ object TestHelper {
               val newValues: Array[Double] = sparseVec.values.map(_ + padded)
               Vectors.sparse(sparseVec.size, sparseVec.indices, newValues)
           }
-          
+
           Row.fromSeq(Seq(label, standardv))
       }
-    
+
     val inputData = sqlContext.createDataFrame(rddData, processedDf.schema)
-      
+
     val selector = new InfoThSelector()
         .setSelectCriterion("mrmr")
         .setNPartitions(nPartitions)
@@ -82,7 +79,7 @@ object TestHelper {
                              allVectorsDense: Boolean = true,
                              padded: Int = 0): InfoThSelectorModel = {
     val processedDf = cleanLabelCol(dataframe, labelColumn)
-    createSelectorModel(sqlContext, processedDf, inputCols, labelColumn, 
+    createSelectorModel(sqlContext, processedDf, inputCols, labelColumn,
         nPartitions, numTopFeatures, allVectorsDense, padded)
   }
 
@@ -120,7 +117,7 @@ object TestHelper {
     LogManager.getRootLogger.setLevel(Level.WARN)
     sc
   }
-  
+
   /** @return standard csv data from the repo.
     */
   def readCSVData(sqlContext: SQLContext, file: String): DataFrame = {
@@ -131,7 +128,7 @@ object TestHelper {
         .load(FILE_PREFIX + file)
        df
   }
-  
+
   /** @return dataset with 3 double columns. The first is the label column and contain null.
     */
   def readNullLabelTestData(sqlContext: SQLContext): DataFrame = {
